@@ -4,11 +4,24 @@ export const dynamic = "force-dynamic";
 
 const BIRDEYE_API_URL = "https://public-api.birdeye.so";
 
+// Convert IPFS URL to a faster gateway
+function convertIpfsUrl(url: string | null): string | null {
+  if (!url) return null;
+  if (url.startsWith("https://ipfs.io/ipfs/")) {
+    // Use cloudflare gateway (faster)
+    return url.replace("https://ipfs.io/ipfs/", "https://cloudflare-ipfs.com/ipfs/");
+  }
+  if (url.startsWith("ipfs://")) {
+    return `https://cloudflare-ipfs.com/ipfs/${url.slice(7)}`;
+  }
+  return url;
+}
+
 export async function GET(
   request: NextRequest,
-  { params }: { params: { mint: string } }
+  { params }: { params: Promise<{ mint: string }> }
 ) {
-  const { mint } = params;
+  const { mint } = await params;
   const birdeyeApiKey = process.env.BIRDEYE_API_KEY;
 
   if (!birdeyeApiKey) {
@@ -52,7 +65,7 @@ export async function GET(
       address: token.address,
       name: token.name,
       symbol: token.symbol,
-      logo_uri: token.logo_uri,
+      logo_uri: convertIpfsUrl(token.logo_uri),
       price: token.price,
       market_cap: token.market_cap,
       liquidity: token.liquidity,
