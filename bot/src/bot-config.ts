@@ -49,7 +49,7 @@ let cachedConfig: BotJsonConfig | null = null;
 export function loadBotConfig(): BotJsonConfig {
   if (cachedConfig) return cachedConfig;
 
-  const configPath = join(process.cwd(), '..', 'BOT_CONFIG.json');
+  const configPath = join(process.cwd(), 'BOT_CONFIG.json');
 
   try {
     const content = readFileSync(configPath, 'utf-8');

@@ -22,68 +22,6 @@ interface ScannedTokensProps {
   className?: string;
 }
 
-// Cache for token logos
-const logoCache = new Map<string, string | null>();
-
-// Token logo component with lazy loading
-function TokenLogo({ mint, symbol, initialUri }: { mint: string; symbol: string; initialUri?: string }) {
-  const [logoUri, setLogoUri] = React.useState<string | null>(initialUri || logoCache.get(mint) || null);
-  const [loading, setLoading] = React.useState(!initialUri && !logoCache.has(mint));
-  const [error, setError] = React.useState(false);
-
-  React.useEffect(() => {
-    if (initialUri || logoCache.has(mint)) return;
-
-    const fetchLogo = async () => {
-      try {
-        const res = await fetch(`/api/token/${mint}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.logo_uri) {
-            logoCache.set(mint, data.logo_uri);
-            setLogoUri(data.logo_uri);
-          } else {
-            logoCache.set(mint, null);
-          }
-        } else {
-          logoCache.set(mint, null);
-        }
-      } catch {
-        logoCache.set(mint, null);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchLogo();
-  }, [mint, initialUri]);
-
-  if (loading) {
-    return (
-      <div className="w-full h-full flex items-center justify-center bg-orange-900/50 animate-pulse">
-        <span className="text-orange-500 text-[8px]">...</span>
-      </div>
-    );
-  }
-
-  if (error || !logoUri) {
-    return (
-      <div className="w-full h-full flex items-center justify-center text-orange-500 text-[10px] font-bold">
-        {symbol?.slice(0, 2).toUpperCase() || "??"}
-      </div>
-    );
-  }
-
-  return (
-    <img
-      src={logoUri}
-      alt={symbol}
-      className="w-full h-full object-cover"
-      onError={() => setError(true)}
-    />
-  );
-}
-
 const ASCII_RADAR = `
     ╭──────────────────╮
     │  ◢◤ RADAR ◥◣    │
@@ -156,7 +94,7 @@ export function ScannedTokens({ className }: ScannedTokensProps) {
       {/* Header */}
       <div className="px-4 py-2 bg-orange-900/30 border-b border-orange-500/30 flex items-center justify-between">
         <span className="font-mono text-orange-400 text-sm tracking-wider">
-          TOKEN_SCANNER.exe 
+          TOKEN_SCANNER.exe
         </span>
         <span className="font-mono text-green-500 text-xs animate-pulse">
           ◉ LIVE
@@ -194,11 +132,20 @@ export function ScannedTokens({ className }: ScannedTokensProps) {
               >
                 {/* Token Image */}
                 <div className="w-8 h-8 rounded-full bg-orange-900/30 overflow-hidden shrink-0 border border-orange-500/30">
-                  <TokenLogo
-                    mint={token.mint}
-                    symbol={token.symbol}
-                    initialUri={token.image_uri}
-                  />
+                  {token.image_uri ? (
+                    <img
+                      src={token.image_uri}
+                      alt={token.symbol}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = "none";
+                      }}
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-orange-500 text-[10px]">
+                      {token.symbol?.slice(0, 2) || "??"}
+                    </div>
+                  )}
                 </div>
 
                 {/* Token Info */}
