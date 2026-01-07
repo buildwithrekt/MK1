@@ -125,12 +125,6 @@ export class ExecutorService {
 
       const result = await this.executeTransaction(params);
 
-      if (result.success) {
-        logger.sell(`${displayName}`, {
-          signature: result.signature,
-        });
-      }
-
       return result;
     } catch (error) {
       const errorMsg = (error as Error).message;
@@ -187,13 +181,14 @@ export class ExecutorService {
   private simulateSell(mint: string, tokenAmount: bigint | string, tokenName: string): TransactionResult {
     const signature = `DRY_RUN_${Date.now()}`;
     const amount = typeof tokenAmount === 'bigint' ? tokenAmount : BigInt(0);
-
-    logger.sell(`${tokenName}`);
+    // Estimate SOL received (rough estimate based on token amount)
+    const estimatedSol = Number(amount) / 1_000_000_000;
 
     return {
       success: true,
       signature,
       tokenAmount: amount,
+      solAmount: estimatedSol,
       simulated: true,
     };
   }

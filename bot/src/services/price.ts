@@ -1,8 +1,18 @@
 const COINGECKO_API = 'https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd';
+const JUPITER_PRICE_API = 'https://price.jup.ag/v6/price';
 
 interface CoinGeckoResponse {
   solana: {
     usd: number;
+  };
+}
+
+interface JupiterPriceResponse {
+  data: {
+    [mint: string]: {
+      id: string;
+      price: number;
+    };
   };
 }
 
@@ -63,6 +73,27 @@ class PriceService {
       return `$${(usdAmount / 1000).toFixed(1)}K`;
     }
     return `$${usdAmount.toFixed(2)}`;
+  }
+
+  // Get token price from Jupiter (for migrated tokens on Raydium)
+  async getTokenPrice(mint: string): Promise<number | null> {
+    try {
+      const response = await fetch(`${JUPITER_PRICE_API}?ids=${mint}`);
+      if (!response.ok) {
+        return null;
+      }
+      const data = await response.json() as JupiterPriceResponse;
+      return data.data?.[mint]?.price || null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Get token price in USD
+  async getTokenPriceUsd(mint: string): Promise<number | null> {
+    const priceInSol = await this.getTokenPrice(mint);
+    if (priceInSol === null) return null;
+    return priceInSol * this.solPrice;
   }
 }
 

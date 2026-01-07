@@ -65,6 +65,16 @@ const typeStyles: Record<string, { color: string; prefix: string; glow: string }
     prefix: "◆",
     glow: "drop-shadow-[0_0_5px_rgba(192,132,252,0.7)]"
   },
+  CLOSE_WIN: {
+    color: "text-green-400",
+    prefix: "◆",
+    glow: "drop-shadow-[0_0_5px_rgba(74,222,128,0.7)]"
+  },
+  CLOSE_LOSS: {
+    color: "text-orange-400",
+    prefix: "◆",
+    glow: "drop-shadow-[0_0_5px_rgba(251,146,60,0.7)]"
+  },
   TRAIL: {
     color: "text-orange-400",
     prefix: "◆",
@@ -78,7 +88,21 @@ function getTradeSubtype(message: string): string | null {
   if (message.includes("🔴 SELL")) return "SELL";
   if (message.includes("📈 OPEN")) return "OPEN";
   if (message.includes("📉 TRAIL")) return "TRAIL";
-  if (message.includes("CLOSE") || message.includes("🔴 CLOSE") || message.includes("🟢 CLOSE")) return "CLOSE";
+  // Profit closes (green)
+  if (message.includes("🟢 PARTIAL")) return "CLOSE_WIN";
+  if (message.includes("🎯 TP")) return "CLOSE_WIN";
+  if (message.includes("📊 PRE-MIG")) return "CLOSE_WIN";
+  if (message.includes("🚀 MIGRATED")) return "CLOSE_WIN";
+  if (message.includes("🟢 CLOSE")) return "CLOSE_WIN";
+  if (message.includes("🟢")) return "CLOSE_WIN";
+  // Loss closes (orange)
+  if (message.includes("🛑 SL")) return "CLOSE_LOSS";
+  if (message.includes("⏰ TIMEOUT")) return "CLOSE_LOSS";
+  if (message.includes("🟠 CLOSE")) return "CLOSE_LOSS";
+  if (message.includes("🟠")) return "CLOSE_LOSS";
+  if (message.includes("🔴 CLOSE")) return "CLOSE_LOSS";
+  // Default close
+  if (message.includes("CLOSE")) return "CLOSE";
   return null;
 }
 
@@ -204,12 +228,6 @@ export function RetroTerminal({ logs, className, maxHeight = "500px" }: RetroTer
               );
             })
           )}
-
-          {/* Blinking cursor */}
-          <div className="flex items-center gap-2 text-green-500 mt-4 pl-12">
-            <span className="text-green-400">&gt;</span>
-            <span className="animate-pulse text-xl">█</span>
-          </div>
         </div>
 
         {/* Bottom status bar */}

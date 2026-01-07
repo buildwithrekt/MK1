@@ -24,20 +24,33 @@ class Logger {
       TRADE: '◆',
     }[level];
 
-    const color = {
+    let color = {
       INFO: '\x1b[90m',    // gray
       WARN: '\x1b[33m',    // yellow
       ERROR: '\x1b[31m',   // red
       TRADE: '\x1b[36m',   // cyan
     }[level];
 
+    // Override color for CLOSE based on profit/loss
+    if (level === 'TRADE' && message.includes('CLOSE')) {
+      if (message.includes('🟢')) {
+        color = '\x1b[32m';  // green for profit
+      } else if (message.includes('🟠')) {
+        color = '\x1b[38;5;208m';  // orange for loss
+      }
+    }
+
     const reset = '\x1b[0m';
 
     // Clean console output
     console.log(`${color}${time} ${prefix} ${message}${reset}`);
 
-    // Log to database (only TRADE logs)
-    if (this.dbEnabled && level === 'TRADE') {
+    // Log to database (TRADE + important WARN/ERROR)
+    const shouldSaveToDb = level === 'TRADE' ||
+      (level === 'WARN' && (message.includes('timeout') || message.includes('stale'))) ||
+      level === 'ERROR';
+
+    if (this.dbEnabled && shouldSaveToDb) {
       try {
         const db = getDatabase();
         await db.log(level, message);

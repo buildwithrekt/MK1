@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { logger } from '../utils/logger.js';
 import { getDatabase } from './database.js';
 import { ExecutorService } from './executor.js';
+import { priceService } from './price.js';
 import type { Position, ExitReason, BotConfig, ExitRules } from '../types/index.js';
 
 interface PricePoint {
@@ -195,13 +196,16 @@ export class PositionManager extends EventEmitter {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // TAKE PROFIT - sell at trigger percent
+    // TAKE PROFIT - partial sell at trigger percent
     // ═══════════════════════════════════════════════════════════════
     if (
       this.exitRules.take_profit.enabled &&
+      !position.tookInitial &&
       pnlPercent >= this.exitRules.take_profit.trigger_percent
     ) {
-      await this.closePosition(position.mint, 'TP');
+      position.tookInitial = true;
+      const sellPercent = this.exitRules.take_profit.sell_percent;
+      await this.partialSell(position, sellPercent, 'TP');
       return;
     }
 
@@ -294,9 +298,15 @@ export class PositionManager extends EventEmitter {
     position.tokenAmount -= tokensToSell;
 
     const soldSol = result.solAmount || 0;
-    const emoji = reason === 'TP' ? '🎯' : reason === 'PRE_MIGRATION' ? '📊' : '🚀';
+    const pnlPercent = position.pnlPercent;
+    const tokenDisplay = `${position.tokenName} (${position.mint.slice(0, 4)})`;
+    const reasonLabel: Record<string, string> = {
+      'TP': '🎯 TP',
+      'PRE_MIGRATION': '📊 PRE-MIG',
+      'POST_MIGRATION': '🚀 POST-MIG',
+    };
 
-    logger.trade(`${emoji} ${position.tokenName} | Sold ${sellPercent}% | +${soldSol.toFixed(4)} SOL`);
+    logger.trade(`🟢 PARTIAL ${tokenDisplay} | ${reasonLabel[reason] || reason} | Sold ${sellPercent}% | +${pnlPercent.toFixed(1)}% | +${soldSol.toFixed(4)} SOL`);
 
     // If no tokens left, close position
     if (position.tokenAmount <= 0n) {
@@ -343,7 +353,7 @@ export class PositionManager extends EventEmitter {
           pnlPercent
         );
       } catch (error) {
-        logger.error('Failed to update trade in database', { error: (error as Error).message });
+        logger.error(`Failed to update trade in database: ${(error as Error).message}`);
       }
     }
 
@@ -352,7 +362,7 @@ export class PositionManager extends EventEmitter {
     const tokenDisplay = `${position.tokenName || mint.slice(0, 8)} (${mint.slice(0, 4)})`;
     const duration = this.formatDuration(Date.now() - position.entryTime.getTime());
     const pnlSign = pnlSol >= 0 ? '+' : '';
-    const pnlColor = pnlSol >= 0 ? '🟢' : '🔴';
+    const pnlColor = pnlSol >= 0 ? '🟢' : '🟠';
 
     // Format market caps
     const formatMc = (mc: number) => mc >= 1000 ? `$${(mc/1000).toFixed(1)}K` : `$${mc.toFixed(0)}`;
@@ -412,6 +422,14 @@ export class PositionManager extends EventEmitter {
 
     this.priceCheckInterval = setInterval(async () => {
       for (const position of this.positions.values()) {
+        // For migrated tokens, fetch price from Jupiter
+        if (position.migrated) {
+          const price = await priceService.getTokenPrice(position.mint);
+          if (price !== null) {
+            const mcUsd = price * 1_000_000_000 * priceService.getSolPrice(); // Rough MC estimate
+            await this.updatePrice(position.mint, price, mcUsd);
+          }
+        }
         await this.checkExitConditions(position);
       }
     }, checkIntervalMs);

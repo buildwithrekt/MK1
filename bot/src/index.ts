@@ -45,7 +45,8 @@ async function main() {
   const jsonConfig = loadBotConfig();
   const scanConfig = loadScanConfig();
 
-  const isDryRun = jsonConfig.mode.dry_run;
+  // Environment variable overrides JSON config (for production)
+  const isDryRun = process.env.DRY_RUN === 'false' ? false : jsonConfig.mode.dry_run;
   console.log(`Mode: ${isDryRun ? '🧪 DRY RUN (Paper Trading)' : '🔴 LIVE TRADING'}`);
   console.log('');
 
@@ -190,6 +191,12 @@ async function main() {
     // Check if we can open a new position
     if (!positionManager.canOpenPosition()) {
       logger.warn(`Max positions (${botConfig.max_positions})`);
+      return;
+    }
+
+    // Check if position already exists for this token
+    if (positionManager.getPosition(token.mint)) {
+      logger.warn(`Position already exists for ${token.symbol}`);
       return;
     }
 
