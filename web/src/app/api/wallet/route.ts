@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 const RPC_URL = process.env.RPC_URL || "https://api.mainnet-beta.solana.com";
 
 export async function GET(request: NextRequest) {

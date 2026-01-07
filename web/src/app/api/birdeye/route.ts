@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 const BIRDEYE_API_URL = 'https://public-api.birdeye.so';
 const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes cache
 
