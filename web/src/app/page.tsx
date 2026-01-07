@@ -1,22 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase, type Trade, type BotConfig, type BotLog } from "../lib/supabase";
-import { RetroTerminal, type LogEntry } from "../components/retro-terminal";
-import { WalletInfo } from "../components/wallet-info";
-import { ScannedTokens } from "../components/scanned-tokens";
-import { PaperTradingBubble } from "../components/paper-trading-bubble";
+import { supabase, type BotConfig, type BotLog } from "@/lib/supabase";
+import { RetroTerminal, type LogEntry } from "@/components/retro-terminal";
+import { WalletInfo } from "@/components/wallet-info";
+import { ScannedTokens } from "@/components/scanned-tokens";
+import { PaperTradingBubble } from "@/components/paper-trading-bubble";
 import { toast } from "sonner";
-import { Badge } from "../components/ui/badge";
-
-const ASCII_LOGO = `
-███╗   ███╗██╗  ██╗ ██╗
-████╗ ████║██║ ██╔╝███║
-██╔████╔██║█████╔╝ ╚██║
-██║╚██╔╝██║██╔═██╗  ██║
-██║ ╚═╝ ██║██║  ██╗ ██║
-╚═╝     ╚═╝╚═╝  ╚═╝ ╚═╝
-`;
 
 interface Stats {
   totalPnlUsd: number;
@@ -34,9 +24,7 @@ export default function Home() {
   });
   const [config, setConfig] = useState<BotConfig | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [isConnected, setIsConnected] = useState(false);
   const [walletAddress, setWalletAddress] = useState<string>("");
-  const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
     // Fetch wallet address from API
@@ -117,9 +105,6 @@ export default function Home() {
     // Refresh stats every 5 minutes (cached on server side anyway)
     const birdeyeInterval = setInterval(fetchBirdeyeStats, 5 * 60 * 1000);
 
-    // Update "now" every 5 seconds for heartbeat check
-    const nowInterval = setInterval(() => setNow(Date.now()), 5000);
-
     // Subscribe to real-time updates
     const configChannel = supabase
       .channel("config_realtime")
@@ -159,13 +144,10 @@ export default function Home() {
           }
         }
       )
-      .subscribe((status) => {
-        setIsConnected(status === "SUBSCRIBED");
-      });
+      .subscribe();
 
     return () => {
       clearInterval(birdeyeInterval);
-      clearInterval(nowInterval);
       supabase.removeChannel(configChannel);
       supabase.removeChannel(tradesChannel);
       supabase.removeChannel(logsChannel);
@@ -178,76 +160,7 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-black text-green-500 font-mono">
-      {/* Scanline overlay */}
-      <div
-        className="pointer-events-none fixed inset-0 z-50"
-        style={{
-          background:
-            "repeating-linear-gradient(0deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 2px)",
-        }}
-      />
-
-      {/* Header */}
-      <header className="border-b-2 border-green-500/50 bg-black/90">
-        <div className="max-w-7xl mx-auto px-4 py-3">
-          {/* ASCII Logo */}
-          <pre className="text-green-500 text-[6px] sm:text-[8px] leading-tight overflow-hidden drop-shadow-[0_0_10px_rgba(34,197,94,0.5)] hidden sm:block">
-            {ASCII_LOGO}
-          </pre>
-          <h1 className="text-xl font-bold text-green-400 sm:hidden drop-shadow-[0_0_10px_rgba(34,197,94,0.5)]">
-            MK1
-          </h1>
-
-          {/* Nav */}
-          <div className="flex items-center justify-between mt-3">
-            <nav className="flex gap-4 text-sm">
-              <span className="text-green-400 border-b border-green-400">
-                [DASHBOARD]
-              </span>
-              <a href="/docs" className="text-green-600 hover:text-green-400 hover:border-b hover:border-green-400 transition-colors">
-                [DOCS]
-              </a>
-            </nav>
-            <div className="flex items-center gap-4">
-              {config && (
-                <span
-                  className={`text-xs px-2 py-1 rounded border ${
-                    config.dry_run
-                      ? "border-yellow-500 text-yellow-400 bg-yellow-500/10"
-                      : "border-red-500 text-red-400 bg-red-500/10 animate-pulse"
-                  }`}
-                >
-                  {config.dry_run ? "◉ PAPER MODE" : "◉ LIVE MODE"}
-                </span>
-              )}
-              <div className="flex items-center gap-2 text-xs">
-                {(() => {
-                  // Check if heartbeat is recent (within 1 minute)
-                  const isOnline = config?.last_heartbeat
-                    ? now - new Date(config.last_heartbeat).getTime() < 60000
-                    : false;
-                  return (
-                    <>
-                      <div
-                        className={`w-2 h-2 rounded-full ${
-                          isOnline
-                            ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)] animate-pulse"
-                            : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"
-                        }`}
-                      />
-                      <span className={isOnline ? "text-green-400" : "text-red-400"}>
-                        {isOnline ? "ONLINE" : "OFFLINE"}
-                      </span>
-                    </>
-                  );
-                })()}
-              </div>
-            </div>
-          </div>
-        </div>
-      </header>
-
+    <main>
       {/* Content */}
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
         {/* Stats Grid - Retro Style */}

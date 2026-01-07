@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { Toaster } from "sonner";
+import { Navbar } from "@/components/navbar";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -17,8 +18,19 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className={inter.className}>
+      <body className={`${inter.className} min-h-screen bg-black text-green-500 font-mono`}>
+        {/* Scanline overlay */}
+        <div
+          className="pointer-events-none fixed inset-0 z-50"
+          style={{
+            background:
+              "repeating-linear-gradient(0deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 2px)",
+          }}
+        />
+
+        <Navbar />
         {children}
+
         <Toaster
           position="top-right"
           toastOptions={{

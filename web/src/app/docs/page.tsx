@@ -1,28 +1,6 @@
 export default function DocsPage() {
   return (
-    <main className="min-h-screen bg-black text-green-500 font-mono">
-      {/* Scanline overlay */}
-      <div
-        className="pointer-events-none fixed inset-0 z-50"
-        style={{
-          background:
-            "repeating-linear-gradient(0deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 2px)",
-        }}
-      />
-
-      {/* Header */}
-      <header className="border-b-2 border-green-500/50 bg-black/90">
-        <div className="max-w-4xl mx-auto px-4 py-6">
-          <a href="/" className="text-green-400 hover:text-green-300 text-sm mb-4 inline-block">
-            ← Back to Dashboard
-          </a>
-          <h1 className="text-3xl font-bold text-green-400 drop-shadow-[0_0_10px_rgba(34,197,94,0.5)]">
-            MK1 Documentation
-          </h1>
-        </div>
-      </header>
-
-      {/* Content */}
+    <main>
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-8">
         {/* What is MK1 */}
         <section className="border-2 border-green-500/30 rounded-lg p-6 bg-black/50">
