@@ -205,6 +205,9 @@ export default function Home() {
               <span className="text-green-400 border-b border-green-400">
                 [DASHBOARD]
               </span>
+              <a href="/docs" className="text-green-600 hover:text-green-400 hover:border-b hover:border-green-400 transition-colors">
+                [DOCS]
+              </a>
             </nav>
             <div className="flex items-center gap-4">
               {config && (
