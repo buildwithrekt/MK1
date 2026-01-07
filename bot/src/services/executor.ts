@@ -76,12 +76,6 @@ export class ExecutorService {
 
       const result = await this.executeTransaction(params);
 
-      if (result.success) {
-        logger.buy(`${displayName} | ${solAmount.toFixed(3)} SOL`, {
-          signature: result.signature,
-        });
-      }
-
       return result;
     } catch (error) {
       const errorMsg = (error as Error).message;
@@ -165,8 +159,6 @@ export class ExecutorService {
   private simulateBuy(mint: string, solAmount: number, tokenName: string): TransactionResult {
     const signature = `DRY_RUN_${Date.now()}`;
     const estimatedTokens = BigInt(Math.floor(solAmount * 1_000_000_000));
-
-    logger.buy(`${tokenName} | ${solAmount.toFixed(3)} SOL`);
 
     return {
       success: true,

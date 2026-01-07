@@ -4,6 +4,47 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 
+// Token image component that fetches from Birdeye API
+const TokenImage = React.memo(function TokenImage({ mint, symbol }: { mint: string; symbol: string }) {
+  const [imageUrl, setImageUrl] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    const fetchImage = async () => {
+      try {
+        const res = await fetch(`/api/token/${mint}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.logo_uri) {
+            setImageUrl(data.logo_uri);
+          }
+        }
+      } catch {
+        // Silently fail
+      }
+    };
+    fetchImage();
+  }, [mint]);
+
+  if (imageUrl) {
+    return (
+      <img
+        src={imageUrl}
+        alt={symbol}
+        className="w-full h-full object-cover"
+        onError={(e) => {
+          (e.target as HTMLImageElement).style.display = "none";
+        }}
+      />
+    );
+  }
+
+  return (
+    <div className="w-full h-full flex items-center justify-center text-orange-500 text-[10px]">
+      {symbol?.slice(0, 2) || "??"}
+    </div>
+  );
+});
+
 interface ScannedToken {
   id: string;
   mint: string;
@@ -132,20 +173,7 @@ export function ScannedTokens({ className }: ScannedTokensProps) {
               >
                 {/* Token Image */}
                 <div className="w-8 h-8 rounded-full bg-orange-900/30 overflow-hidden shrink-0 border border-orange-500/30">
-                  {token.image_uri ? (
-                    <img
-                      src={token.image_uri}
-                      alt={token.symbol}
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = "none";
-                      }}
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-orange-500 text-[10px]">
-                      {token.symbol?.slice(0, 2) || "??"}
-                    </div>
-                  )}
+                  <TokenImage mint={token.mint} symbol={token.symbol} />
                 </div>
 
                 {/* Token Info */}

@@ -20,6 +20,14 @@ export interface ScanConfig {
     min_unique_buyers: number;
     buy_sell_ratio: number;
   };
+  birdeye_filters: {
+    enabled: boolean;
+    min_liquidity_usd: number;
+    max_progress_percent: number;
+    require_socials: boolean;
+    min_token_age_seconds: number;
+    creator_blacklist: string[];
+  };
   logging: {
     new_tokens: boolean;
     token_entered_zone: boolean;
@@ -46,7 +54,7 @@ let cachedConfig: ScanConfig | null = null;
 export function loadScanConfig(forceReload = false): ScanConfig {
   if (cachedConfig && !forceReload) return cachedConfig;
 
-  const configPath = join(process.cwd(), '..', 'SCAN_CONFIG.json');
+  const configPath = join(process.cwd(), 'SCAN_CONFIG.json');
 
   try {
     const content = readFileSync(configPath, 'utf-8');
@@ -71,6 +79,14 @@ export function loadScanConfig(forceReload = false): ScanConfig {
         min_buy_volume_usd: 1000,
         min_unique_buyers: 15,
         buy_sell_ratio: 1.2,
+      },
+      birdeye_filters: {
+        enabled: true,
+        min_liquidity_usd: 1000,
+        max_progress_percent: 80,
+        require_socials: false,
+        min_token_age_seconds: 60,
+        creator_blacklist: [],
       },
       logging: {
         new_tokens: false,

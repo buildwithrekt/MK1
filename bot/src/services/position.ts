@@ -158,6 +158,9 @@ export class PositionManager extends EventEmitter {
     }
 
     const { pnlPercent, marketCapUsd } = position;
+
+    // Debug: log every check with current PnL
+    console.log(`[EXIT CHECK] ${position.tokenName} | PnL: ${pnlPercent.toFixed(1)}% | SL threshold: -${this.exitRules.stop_loss.percent}%`);
     const timeInPosition = Date.now() - position.entryTime.getTime();
 
     // ═══════════════════════════════════════════════════════════════
@@ -190,9 +193,12 @@ export class PositionManager extends EventEmitter {
     // ═══════════════════════════════════════════════════════════════
     // STOP LOSS - sell 100% and close
     // ═══════════════════════════════════════════════════════════════
-    if (this.exitRules.stop_loss.enabled && pnlPercent <= -this.exitRules.stop_loss.percent) {
-      await this.closePosition(position.mint, 'SL');
-      return;
+    if (this.exitRules.stop_loss.enabled) {
+      if (pnlPercent <= -this.exitRules.stop_loss.percent) {
+        logger.info(`🛑 SL triggered for ${position.tokenName} | PnL: ${pnlPercent.toFixed(1)}% <= -${this.exitRules.stop_loss.percent}%`);
+        await this.closePosition(position.mint, 'SL');
+        return;
+      }
     }
 
     // ═══════════════════════════════════════════════════════════════

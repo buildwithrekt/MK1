@@ -17,6 +17,14 @@
     "min_unique_buyers": 15,
     "buy_sell_ratio": 1.2
   },
+  "birdeye_filters": {
+    "enabled": true,
+    "min_liquidity_usd": 500,
+    "max_progress_percent": 80,
+    "require_socials": true,
+    "min_token_age_seconds": 30,
+    "creator_blacklist": []
+  },
   "logging": {
     "new_tokens": false,
     "token_entered_zone": true,

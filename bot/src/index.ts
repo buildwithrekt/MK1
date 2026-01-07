@@ -9,6 +9,7 @@ import { getDatabase } from './services/database.js';
 import { priceService } from './services/price.js';
 import { logger } from './utils/logger.js';
 import { CONFIG_POLL_INTERVAL, PRICE_CHECK_INTERVAL } from './constants.js';
+import { fetchAndValidateToken } from './services/birdeye.js';
 import type { BotConfig, ExitRules } from './types/index.js';
 
 // Token being monitored in memory (NOT saved to DB until it passes filters)
@@ -200,6 +201,24 @@ async function main() {
       return;
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // BIRDEYE VALIDATION - Fetch and validate token data from Birdeye API
+    // ═══════════════════════════════════════════════════════════════════════════
+    if (scanConfig.birdeye_filters.enabled) {
+      const birdeyeResult = await fetchAndValidateToken(token.mint, scanConfig.birdeye_filters);
+
+      if (!birdeyeResult.passed) {
+        logger.info(`❌ Birdeye rejected ${token.symbol}: ${birdeyeResult.reasons.join(', ')}`);
+        return;
+      }
+
+      // Log Birdeye data
+      if (birdeyeResult.data) {
+        const be = birdeyeResult.data;
+        logger.info(`✅ Birdeye OK ${token.symbol} | Liq: $${be.liquidity.toFixed(0)} | Progress: ${be.meme_info.progress_percent.toFixed(1)}%`);
+      }
+    }
+
     const marketCapUsd = priceService.solToUsd(token.marketCapSol);
     const buyVolumeUsd = priceService.solToUsd(token.totalBuyVolume);
     const uniqueBuyers = token.uniqueBuyers.size;
@@ -210,7 +229,6 @@ async function main() {
         mint: token.mint,
         name: token.name,
         symbol: token.symbol,
-        imageUri: token.uri,
         marketCapUsd,
         buyVolumeUsd,
         uniqueBuyers,

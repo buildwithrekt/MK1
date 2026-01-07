@@ -9,7 +9,7 @@ interface WalletInfoProps {
 }
 
 
-export function WalletInfo({ publicKey, className }: WalletInfoProps) {
+export const WalletInfo = React.memo(function WalletInfo({ publicKey, className }: WalletInfoProps) {
   const [balance, setBalance] = React.useState<number | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [copied, setCopied] = React.useState(false);
@@ -115,4 +115,4 @@ export function WalletInfo({ publicKey, className }: WalletInfoProps) {
       </div>
     </div>
   );
-}
+});
