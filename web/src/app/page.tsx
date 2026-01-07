@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase, type Trade, type BotConfig, type BotLog } from "@/lib/supabase";
-import { Badge } from "@/components/ui/badge";
-import { RetroTerminal, type LogEntry } from "@/components/retro-terminal";
-import { WalletInfo } from "@/components/wallet-info";
-import { ScannedTokens } from "@/components/scanned-tokens";
-import { PaperTradingBubble } from "@/components/paper-trading-bubble";
+import { supabase, type Trade, type BotConfig, type BotLog } from "../lib/supabase";
+import { RetroTerminal, type LogEntry } from "../components/retro-terminal";
+import { WalletInfo } from "../components/wallet-info";
+import { ScannedTokens } from "../components/scanned-tokens";
+import { PaperTradingBubble } from "../components/paper-trading-bubble";
 import { toast } from "sonner";
+import { Badge } from "../components/ui/badge";
 
 const ASCII_LOGO = `
 ███╗   ███╗██╗  ██╗ ██╗

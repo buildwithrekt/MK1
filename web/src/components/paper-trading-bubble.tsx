@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { supabase, type Trade } from "@/lib/supabase";
+import { supabase, type Trade } from "../lib/supabase";
 
 interface PaperTradingBubbleProps {
   initialBalance: number;
