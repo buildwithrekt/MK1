@@ -1,0 +1,66 @@
+{
+  "strategy": "hold_until_loss_migration",
+  "api": {
+    "pumpportal_trade_url": "https://pumpportal.fun/api/trade",
+    "sol_price_url": "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd",
+    "rpc_url": "https://api.mainnet-beta.solana.com"
+  },
+  "trading": {
+    "amount_per_trade_usd": 7,
+    "max_positions": 5,
+    "slippage_percent": 15,
+    "priority_fee_sol": 0.0005
+  },
+  "entry_rules": {
+    "require_scanner_approval": true,
+    "max_entry_market_cap_usd": 20000
+  },
+  "exit_rules": {
+    "stop_loss": {
+      "enabled": true,
+      "percent": 20
+    },
+    "take_profit": {
+      "enabled": true,
+      "trigger_percent": 100,
+      "sell_percent": 50
+    },
+    "pre_migration": {
+      "enabled": true,
+      "market_cap_threshold_usd": 40000,
+      "sell_percent": 100
+    },
+    "post_migration": {
+      "enabled": false,
+      "sell_percent": 0
+    },
+    "trailing_stop": {
+      "enabled": false,
+      "activation_percent": 50,
+      "trail_percent": 25
+    },
+    "hard_timeout": {
+      "enabled": true,
+      "minutes": 10
+    },
+    "stale_timeout": {
+      "enabled": true,
+      "seconds": 120
+    }
+  },
+  "logging": {
+    "trades": true,
+    "position_updates": true,
+    "pnl": true,
+    "errors": true
+  },
+  "terminal": {
+    "show_trades": true,
+    "show_positions": true,
+    "show_pnl": true
+  },
+  "mode": {
+    "dry_run": true,
+    "is_running": true
+  }
+}

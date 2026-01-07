@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  bot:
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
+    container_name: mk1-bot
+    restart: unless-stopped
+    env_file:
+      - ./bot/.env
+    volumes:
+      - ./BOT_CONFIG.json:/app/../BOT_CONFIG.json:ro
+      - ./SCAN_CONFIG.json:/app/../SCAN_CONFIG.json:ro
+    depends_on:
+      - web
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: mk1-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./web/.env.local

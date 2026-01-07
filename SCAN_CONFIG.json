@@ -1,0 +1,39 @@
+{
+  "scanner": {
+    "websocket_url": "wss://pumpportal.fun/api/data",
+    "reconnect_delay_ms": 3000,
+    "max_reconnect_attempts": 10
+  },
+  "monitoring": {
+    "min_initial_market_cap_usd": 3000,
+    "monitoring_duration_seconds": 300,
+    "max_tokens_monitored": 100
+  },
+  "entry_filters": {
+    "dev_must_sell": true,
+    "min_market_cap_usd": 13000,
+    "max_market_cap_usd": 45000,
+    "min_buy_volume_usd": 1000,
+    "min_unique_buyers": 15,
+    "buy_sell_ratio": 1.2
+  },
+  "logging": {
+    "new_tokens": false,
+    "token_entered_zone": true,
+    "momentum_box": true,
+    "errors": true
+  },
+  "database": {
+    "save_passed_tokens": true,
+    "save_logs": true,
+    "max_passed_tokens": 50,
+    "max_logs": 500
+  },
+  "terminal": {
+    "show_new_tokens": false,
+    "show_monitoring_count": true,
+    "show_zone_entries": true,
+    "show_momentum": true,
+    "show_system_logs": false
+  }
+}
