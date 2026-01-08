@@ -9,6 +9,7 @@ export interface BirdeyeTokenData {
   address: string;
   name: string;
   symbol: string;
+  logo_uri: string | null;
   price: number;
   liquidity: number;
   market_cap: number;
@@ -91,6 +92,7 @@ export async function fetchTokenData(mint: string): Promise<BirdeyeTokenData | n
       address: d.address,
       name: d.name,
       symbol: d.symbol,
+      logo_uri: d.logo_uri || null,
       price: d.price || 0,
       liquidity: d.liquidity || 0,
       market_cap: d.market_cap || 0,
@@ -195,4 +197,75 @@ export async function fetchAndValidateToken(
   }
 
   return validateToken(data, filters);
+}
+
+/**
+ * Fetch token logo URI from Birdeye
+ */
+export async function fetchTokenLogoUri(mint: string): Promise<string | null> {
+  const data = await fetchTokenData(mint);
+  return data?.logo_uri || null;
+}
+
+/**
+ * Fetch image from token metadata URI (IPFS/Arweave)
+ * This is more reliable for new tokens since Birdeye might not have indexed them yet
+ */
+export async function fetchImageFromMetadataUri(metadataUri: string): Promise<string | null> {
+  if (!metadataUri) return null;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    // Handle IPFS gateway conversion
+    let fetchUrl = metadataUri;
+    if (metadataUri.startsWith('ipfs://')) {
+      fetchUrl = metadataUri.replace('ipfs://', 'https://ipfs.io/ipfs/');
+    }
+
+    const response = await fetch(fetchUrl, {
+      method: 'GET',
+      signal: controller.signal,
+      headers: {
+        'accept': 'application/json',
+      },
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const metadata = await response.json() as { image?: string };
+
+    if (metadata.image) {
+      // Handle IPFS image URLs
+      if (metadata.image.startsWith('ipfs://')) {
+        return metadata.image.replace('ipfs://', 'https://ipfs.io/ipfs/');
+      }
+      return metadata.image;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch token logo - tries metadata URI first, then falls back to Birdeye
+ */
+export async function fetchTokenLogo(mint: string, metadataUri?: string): Promise<string | null> {
+  // Try metadata URI first (faster and works for new tokens)
+  if (metadataUri) {
+    const imageFromMetadata = await fetchImageFromMetadataUri(metadataUri);
+    if (imageFromMetadata) {
+      return imageFromMetadata;
+    }
+  }
+
+  // Fall back to Birdeye
+  return fetchTokenLogoUri(mint);
 }

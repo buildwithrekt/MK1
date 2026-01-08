@@ -29,42 +29,23 @@ interface MonitoredTokensProps {
   className?: string;
 }
 
-// Token image component
+// Token image component - uses stored image_uri from monitored_tokens
 const TokenImage = React.memo(function TokenImage({
   imageUri,
-  mint,
   symbol
 }: {
   imageUri?: string;
-  mint: string;
   symbol: string;
 }) {
-  const [imgSrc, setImgSrc] = React.useState<string | null>(imageUri || null);
-  const [loaded, setLoaded] = React.useState(false);
-
-  React.useEffect(() => {
-    if (!imageUri) {
-      // Try to fetch from API
-      fetch(`/api/token/${mint}`)
-        .then(res => res.ok ? res.json() : null)
-        .then(data => {
-          if (data?.logo_uri) setImgSrc(data.logo_uri);
-        })
-        .catch(() => {});
-    }
-  }, [imageUri, mint]);
-
-  if (imgSrc) {
+  if (imageUri) {
     return (
       <img
-        src={imgSrc}
+        src={imageUri}
         alt={symbol}
-        className={cn(
-          "w-full h-full object-cover transition-opacity",
-          loaded ? "opacity-100" : "opacity-0"
-        )}
-        onLoad={() => setLoaded(true)}
-        onError={() => setImgSrc(null)}
+        className="w-full h-full object-cover"
+        onError={(e) => {
+          (e.target as HTMLImageElement).style.display = "none";
+        }}
       />
     );
   }
@@ -93,15 +74,13 @@ const FilterBadge = ({ ok, label }: { ok: boolean; label: string }) => (
 export function MonitoredTokens({ className }: MonitoredTokensProps) {
   const [tokens, setTokens] = React.useState<MonitoredToken[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const [sortBy, setSortBy] = React.useState<"volume" | "mc" | "buyers">("volume");
 
   const fetchTokens = React.useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from("monitored_tokens")
         .select("*")
-        .order("all_filters_passed", { ascending: false })
-        .order("buy_volume_usd", { ascending: false })
+        .order("last_updated_at", { ascending: false })
         .limit(100);
 
       if (data && !error) {
@@ -136,24 +115,6 @@ export function MonitoredTokens({ className }: MonitoredTokensProps) {
     };
   }, [fetchTokens]);
 
-  // Sort tokens
-  const sortedTokens = React.useMemo(() => {
-    const sorted = [...tokens];
-    switch (sortBy) {
-      case "mc":
-        sorted.sort((a, b) => b.market_cap_usd - a.market_cap_usd);
-        break;
-      case "buyers":
-        sorted.sort((a, b) => b.unique_buyers - a.unique_buyers);
-        break;
-      case "volume":
-      default:
-        sorted.sort((a, b) => b.buy_volume_usd - a.buy_volume_usd);
-    }
-    // Always put passed tokens first
-    return sorted.sort((a, b) => (b.all_filters_passed ? 1 : 0) - (a.all_filters_passed ? 1 : 0));
-  }, [tokens, sortBy]);
-
   const passedCount = tokens.filter(t => t.all_filters_passed).length;
   const getPumpFunUrl = (mint: string) => `https://pump.fun/coin/${mint}`;
 
@@ -186,25 +147,6 @@ export function MonitoredTokens({ className }: MonitoredTokensProps) {
         </div>
       </div>
 
-      {/* Sort controls */}
-      <div className="px-4 py-1.5 bg-cyan-900/20 border-b border-cyan-500/20 flex items-center gap-2">
-        <span className="font-mono text-cyan-600 text-xs">SORT:</span>
-        {(["volume", "mc", "buyers"] as const).map((sort) => (
-          <button
-            key={sort}
-            onClick={() => setSortBy(sort)}
-            className={cn(
-              "font-mono text-xs px-2 py-0.5 rounded transition-colors",
-              sortBy === sort
-                ? "bg-cyan-500/30 text-cyan-300"
-                : "text-cyan-600 hover:text-cyan-400"
-            )}
-          >
-            {sort.toUpperCase()}
-          </button>
-        ))}
-      </div>
-
       {/* Table Header */}
       <div className="px-2 py-1.5 bg-cyan-900/10 border-b border-cyan-500/20 font-mono text-[10px] text-cyan-500 grid grid-cols-[40px_1fr_70px_70px_50px_60px_120px] gap-2 items-center">
         <span></span>
@@ -217,7 +159,7 @@ export function MonitoredTokens({ className }: MonitoredTokensProps) {
       </div>
 
       {/* Token List */}
-      <div className="font-mono bg-black/80 max-h-[500px] overflow-y-auto">
+      <div className="font-mono bg-black/80 max-h-[500px] overflow-y-auto cyan-scrollbar">
         {loading ? (
           <div className="text-cyan-400 animate-pulse text-center py-8">
             LOADING MONITORED TOKENS...
@@ -227,7 +169,7 @@ export function MonitoredTokens({ className }: MonitoredTokensProps) {
             NO TOKENS BEING MONITORED
           </div>
         ) : (
-          sortedTokens.map((token) => (
+          tokens.map((token) => (
             <a
               key={token.id}
               href={getPumpFunUrl(token.mint)}
@@ -244,7 +186,6 @@ export function MonitoredTokens({ className }: MonitoredTokensProps) {
               <div className="w-8 h-8 rounded-full bg-cyan-900/30 overflow-hidden border border-cyan-500/30">
                 <TokenImage
                   imageUri={token.image_uri}
-                  mint={token.mint}
                   symbol={token.symbol}
                 />
               </div>

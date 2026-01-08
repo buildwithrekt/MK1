@@ -32,9 +32,7 @@
       "errors": true
     },
     "database": {
-      "save_passed_tokens": true,
       "save_logs": true,
-      "max_passed_tokens": 50,
       "max_logs": 500
     },
     "terminal": {

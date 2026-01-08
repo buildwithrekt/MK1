@@ -44,11 +44,9 @@ export default function Home() {
 
     fetchWalletAddress();
 
-    // Fetch stats (PNL and win rate only) - only when tab is visible
+    // Fetch stats (PNL and win rate only)
     const fetchBirdeyeStats = async () => {
-      // Skip if tab is not visible
       if (document.hidden) return;
-
       try {
         const res = await fetch("/api/birdeye");
         if (res.ok) {
@@ -56,7 +54,7 @@ export default function Home() {
           setStats((prev) => ({
             ...prev,
             totalPnlUsd: data.totalPnlUsd || 0,
-            winRate: (data.winRate || 0) * 100, // Convert from decimal to percentage
+            winRate: (data.winRate || 0) * 100,
           }));
         }
       } catch (error) {
@@ -66,7 +64,6 @@ export default function Home() {
 
     // Fetch initial data
     const fetchData = async () => {
-      // Fetch config
       const { data: configData } = await supabase
         .from("bot_config")
         .select("*")
@@ -74,7 +71,6 @@ export default function Home() {
         .single();
       if (configData) setConfig(configData);
 
-      // Fetch trades stats from Supabase (real-time)
       const { data: trades } = await supabase
         .from("trades")
         .select("status");
@@ -89,12 +85,10 @@ export default function Home() {
         }));
       }
 
-      // Fetch logs
       const { data: logsData } = await supabase
         .from("bot_logs")
         .select("*")
-        .order("created_at", { ascending: true })
-        .limit(100);
+        .order("created_at", { ascending: true });
 
       if (logsData) {
         setLogs(logsData);
@@ -104,18 +98,16 @@ export default function Home() {
     fetchData();
     fetchBirdeyeStats();
 
-    // Refresh stats every 5 minutes (cached on server side anyway)
+    // Refresh stats every 5 minutes
     const birdeyeInterval = setInterval(fetchBirdeyeStats, 5 * 60 * 1000);
 
-    // Subscribe to real-time updates
+    // Setup realtime subscriptions
     const configChannel = supabase
       .channel("config_realtime")
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "bot_config" },
-        (payload) => {
-          setConfig(payload.new as BotConfig);
-        }
+        (payload) => setConfig(payload.new as BotConfig)
       )
       .subscribe();
 
@@ -135,9 +127,8 @@ export default function Home() {
         { event: "INSERT", schema: "public", table: "bot_logs" },
         (payload) => {
           const newLog = payload.new as BotLog;
-          setLogs((prev) => [...prev, newLog].slice(-200));
+          setLogs((prev) => [...prev, newLog]);
 
-          // Show toast for BUY signals
           if (newLog.type === "TRADE" && newLog.message.includes("🟢 BUY")) {
             toast.success("🔔 NEW POSITION", {
               description: newLog.message,
@@ -148,8 +139,12 @@ export default function Home() {
       )
       .subscribe();
 
+    // Backup polling every 30s
+    const pollingInterval = setInterval(fetchData, 30000);
+
     return () => {
       clearInterval(birdeyeInterval);
+      clearInterval(pollingInterval);
       supabase.removeChannel(configChannel);
       supabase.removeChannel(tradesChannel);
       supabase.removeChannel(logsChannel);
@@ -163,19 +158,15 @@ export default function Home() {
 
   return (
     <main>
-      {/* Content */}
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        {/* Stats Grid - Retro Style */}
+        {/* Stats Grid */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {[
             {
               label: "TOTAL PNL",
               value: formatPnlUsd(stats.totalPnlUsd),
               color: stats.totalPnlUsd >= 0 ? "text-green-400" : "text-red-400",
-              border:
-                stats.totalPnlUsd >= 0
-                  ? "border-green-500/50"
-                  : "border-red-500/50",
+              border: stats.totalPnlUsd >= 0 ? "border-green-500/50" : "border-red-500/50",
             },
             {
               label: "WIN RATE",
@@ -201,9 +192,7 @@ export default function Home() {
               className={`rounded-lg border-2 ${stat.border} bg-black p-4 shadow-lg`}
             >
               <div className="text-xs text-zinc-500 mb-1">{stat.label}</div>
-              <div
-                className={`text-2xl font-bold ${stat.color} drop-shadow-[0_0_10px_currentColor]`}
-              >
+              <div className={`text-2xl font-bold ${stat.color} drop-shadow-[0_0_10px_currentColor]`}>
                 {stat.value}
               </div>
             </div>
@@ -215,18 +204,13 @@ export default function Home() {
 
         {/* Main Grid - Terminal + Sidebar */}
         <div className="grid gap-6 lg:grid-cols-3">
-          {/* Left Column - Terminal + Monitored Tokens */}
           <div className="lg:col-span-2 space-y-6">
             <RetroTerminal logs={logs} maxHeight="400px" />
             <MonitoredTokens />
           </div>
 
-          {/* Sidebar */}
           <div className="space-y-6">
-            {/* Wallet Info */}
             {walletAddress && <WalletInfo publicKey={walletAddress} />}
-
-            {/* Scanned Tokens */}
             <ScannedTokens />
           </div>
         </div>
@@ -236,14 +220,11 @@ export default function Home() {
       <footer className="border-t-2 border-green-500/30 bg-black/90 mt-8">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between text-xs text-green-700">
           <span>MK1 v0.01</span>
-          <span className="animate-pulse">
-            ████████████████░░░░ SYSTEM OPERATIONAL
-          </span>
+          <span className="animate-pulse">████████████████░░░░ SYSTEM OPERATIONAL</span>
         </div>
       </footer>
 
-      {/* Paper Trading Bubble - only show in dry run mode */}
-      {config?.dry_run && <PaperTradingBubble initialBalance={0.5} />}
+      <PaperTradingBubble />
     </main>
   );
 }

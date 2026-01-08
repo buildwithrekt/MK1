@@ -21,6 +21,7 @@ export interface BotJsonConfig {
   exit_rules: {
     stop_loss: { enabled: boolean; percent: number };
     take_profit: { enabled: boolean; trigger_percent: number; sell_percent: number };
+    post_tp_target: { enabled: boolean; min_market_cap_usd: number; max_market_cap_usd: number };
     pre_migration: { enabled: boolean; market_cap_threshold_usd: number; sell_percent: number };
     post_migration: { enabled: boolean; sell_percent: number };
     trailing_stop: { enabled: boolean; activation_percent: number; trail_percent: number };
@@ -78,6 +79,7 @@ export function loadBotConfig(): BotJsonConfig {
       exit_rules: {
         stop_loss: { enabled: true, percent: 10 },
         take_profit: { enabled: true, trigger_percent: 20, sell_percent: 100 },
+        post_tp_target: { enabled: true, min_market_cap_usd: 30000, max_market_cap_usd: 40000 },
         pre_migration: { enabled: false, market_cap_threshold_usd: 50000, sell_percent: 50 },
         post_migration: { enabled: false, sell_percent: 70 },
         trailing_stop: { enabled: false, activation_percent: 50, trail_percent: 25 },

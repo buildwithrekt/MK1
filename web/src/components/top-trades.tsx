@@ -8,6 +8,7 @@ interface TopTrade {
   id: string;
   token_address: string;
   token_name: string | null;
+  image_uri: string | null;
   entry_price: number;
   exit_price: number;
   pnl_sol: number;
@@ -18,32 +19,23 @@ interface TopTrade {
   created_at: string;
 }
 
-// Token image component
+// Token image component - uses stored image_uri from trade
 const TokenImage = React.memo(function TokenImage({
-  mint,
+  imageUri,
   name
 }: {
-  mint: string;
+  imageUri: string | null;
   name: string | null;
 }) {
-  const [imgSrc, setImgSrc] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    fetch(`/api/token/${mint}`)
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (data?.logo_uri) setImgSrc(data.logo_uri);
-      })
-      .catch(() => {});
-  }, [mint]);
-
-  if (imgSrc) {
+  if (imageUri) {
     return (
       <img
-        src={imgSrc}
+        src={imageUri}
         alt={name || "token"}
         className="w-full h-full object-cover"
-        onError={() => setImgSrc(null)}
+        onError={(e) => {
+          (e.target as HTMLImageElement).style.display = "none";
+        }}
       />
     );
   }
@@ -162,7 +154,7 @@ export function TopTrades({ className }: TopTradesProps) {
             {/* Token header */}
             <div className="flex items-center gap-2 p-2 bg-green-900/20 border-b border-green-500/20">
               <div className="w-8 h-8 rounded-full overflow-hidden border border-green-500/30 shrink-0">
-                <TokenImage mint={trade.token_address} name={trade.token_name} />
+                <TokenImage imageUri={trade.image_uri} name={trade.token_name} />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="text-green-300 font-bold text-xs truncate">
@@ -177,7 +169,7 @@ export function TopTrades({ className }: TopTradesProps) {
             {/* PNL */}
             <div className="p-2 text-center">
               <div className="text-green-400 text-xl font-bold drop-shadow-[0_0_10px_rgba(34,197,94,0.5)]">
-                +{trade.pnl_percent.toFixed(0)}%
+                +{trade.pnl_percent.toFixed(1)}%
               </div>
               <div className="text-green-600 text-xs font-mono">
                 +{trade.pnl_sol.toFixed(4)} SOL

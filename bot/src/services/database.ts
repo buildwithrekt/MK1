@@ -26,6 +26,7 @@ const DEFAULT_ENTRY_RULES: EntryRules = {
 const DEFAULT_EXIT_RULES: ExitRules = {
   stop_loss: { enabled: true, percent: 10 },
   take_profit: { enabled: true, trigger_percent: 20, sell_percent: 100 },
+  post_tp_target: { enabled: true, min_market_cap_usd: 30000, max_market_cap_usd: 40000 },
   pre_migration: { enabled: false, market_cap_threshold_usd: 50000, sell_percent: 50 },
   post_migration: { enabled: false, sell_percent: 100 },
   hard_timeout: { enabled: true, minutes: 10 },
@@ -66,6 +67,7 @@ export interface NewTrade {
   amount_sol: number;
   token_amount?: number;
   dry_run: boolean;
+  image_uri?: string;
 }
 
 export interface UpdateTrade {
@@ -114,6 +116,7 @@ export class DatabaseService {
         amount_sol: trade.amount_sol,
         token_amount: trade.token_amount,
         dry_run: trade.dry_run,
+        image_uri: trade.image_uri,
         status: 'OPEN',
       })
       .select()
@@ -270,27 +273,6 @@ export class DatabaseService {
     return this.getFullConfig();
   }
 
-  // ============== HEARTBEAT ==============
-
-  async sendHeartbeat(): Promise<void> {
-    try {
-      const current = await this.getConfig();
-      // Use Supabase server time to avoid timezone issues
-      await this.supabase.rpc('update_heartbeat', { config_id: current.id });
-    } catch (error) {
-      // Fallback to client time if RPC doesn't exist
-      try {
-        const current = await this.getConfig();
-        await this.supabase
-          .from('bot_config')
-          .update({ last_heartbeat: new Date().toISOString() })
-          .eq('id', current.id);
-      } catch {
-        // Silently fail
-      }
-    }
-  }
-
   // ============== LOGS ==============
 
   private maxLogs = 500;
@@ -328,7 +310,7 @@ export class DatabaseService {
     return data || [];
   }
 
-  // ============== STATS ==============
+  // ============== STATS (legacy - for backwards compat) ==============
 
   async getStats(dryRun?: boolean): Promise<BotStats> {
     let query = this.supabase.from('trades').select('*');
@@ -372,80 +354,164 @@ export class DatabaseService {
     };
   }
 
-  // ============== PASSED TOKENS ==============
+  // ============== BOT STATS (new centralized stats) ==============
 
-  private maxPassedTokens = 50;
-
-  setMaxPassedTokens(max: number) {
-    this.maxPassedTokens = max;
-  }
-
-  async savePassedToken(token: {
-    mint: string;
-    name?: string;
-    symbol?: string;
-    imageUri?: string;
-    marketCapUsd?: number;
-    buyVolumeUsd?: number;
-    uniqueBuyers?: number;
-    status: 'PASSED' | 'ENTERED';
-  }): Promise<void> {
-    const { error } = await this.supabase.from('passed_tokens').upsert({
-      mint: token.mint,
-      name: token.name,
-      symbol: token.symbol,
-      image_uri: token.imageUri,
-      market_cap_usd: token.marketCapUsd,
-      buy_volume_usd: token.buyVolumeUsd,
-      unique_buyers: token.uniqueBuyers,
-      status: token.status,
-    }, { onConflict: 'mint' });
+  async getBotStats(mode: 'paper' | 'live'): Promise<{
+    mode: string;
+    initial_balance: number;
+    current_balance: number;
+    total_pnl_sol: number;
+    total_pnl_percent: number;
+    total_trades: number;
+    winning_trades: number;
+    losing_trades: number;
+    win_rate: number;
+    best_trade_pnl_percent: number;
+    worst_trade_pnl_percent: number;
+    total_volume_sol: number;
+    avg_trade_pnl_percent: number;
+    last_trade_at: string | null;
+    updated_at: string;
+  } | null> {
+    const { data, error } = await this.supabase
+      .from('bot_stats')
+      .select('*')
+      .eq('mode', mode)
+      .single();
 
     if (error) {
-      console.error('❌ Failed to save passed token:', error.message, error.code);
+      console.error('Failed to get bot stats:', error);
+      return null;
     }
-
-    // Cleanup old entries (keep only 50)
-    await this.cleanupPassedTokens();
+    return data;
   }
 
-  async updatePassedTokenStatus(mint: string, status: 'PASSED' | 'ENTERED'): Promise<void> {
-    const { error } = await this.supabase
-      .from('passed_tokens')
-      .update({ status })
-      .eq('mint', mint);
+  async updateBotStatsOnTradeClose(
+    pnlSol: number,
+    pnlPercent: number,
+    amountSol: number,
+    isDryRun: boolean
+  ): Promise<void> {
+    const mode = isDryRun ? 'paper' : 'live';
 
-    if (error) {
-      console.error('Failed to update passed token status:', error);
-    }
-  }
-
-  async cleanupPassedTokens(): Promise<void> {
     try {
-      // Get count
-      const { count } = await this.supabase
-        .from('passed_tokens')
-        .select('*', { count: 'exact', head: true });
+      let currentStats = await this.getBotStats(mode);
 
-      if (count && count > this.maxPassedTokens) {
-        // Get IDs to delete (oldest entries beyond max)
-        const { data: oldEntries } = await this.supabase
-          .from('passed_tokens')
-          .select('id')
-          .order('created_at', { ascending: true })
-          .limit(count - this.maxPassedTokens);
+      // Create the row if it doesn't exist
+      if (!currentStats) {
+        console.log(`Creating bot_stats row for mode: ${mode}`);
+        const initialBalance = 0.5;
+        const { error: insertError } = await this.supabase
+          .from('bot_stats')
+          .insert({
+            mode,
+            initial_balance: initialBalance,
+            current_balance: initialBalance,
+            total_pnl_sol: 0,
+            total_pnl_percent: 0,
+            total_trades: 0,
+            winning_trades: 0,
+            losing_trades: 0,
+            win_rate: 0,
+            best_trade_pnl_percent: 0,
+            worst_trade_pnl_percent: 0,
+            total_volume_sol: 0,
+            avg_trade_pnl_percent: 0,
+          });
 
-        if (oldEntries && oldEntries.length > 0) {
-          const idsToDelete = oldEntries.map(e => e.id);
-          await this.supabase
-            .from('passed_tokens')
-            .delete()
-            .in('id', idsToDelete);
+        if (insertError) {
+          console.error('Failed to create bot_stats row:', insertError);
+          return;
+        }
+
+        currentStats = await this.getBotStats(mode);
+        if (!currentStats) {
+          console.error('Still no bot_stats row after insert');
+          return;
         }
       }
-    } catch (error) {
-      // Silently fail cleanup
+
+      const isWin = pnlSol > 0;
+      const newTotalTrades = currentStats.total_trades + 1;
+      const newWinningTrades = currentStats.winning_trades + (isWin ? 1 : 0);
+      const newLosingTrades = currentStats.losing_trades + (isWin ? 0 : 1);
+      const newTotalPnlSol = currentStats.total_pnl_sol + pnlSol;
+      const newCurrentBalance = currentStats.current_balance + pnlSol;
+      const newTotalVolume = currentStats.total_volume_sol + amountSol;
+
+      // Calculate new PNL percent based on initial balance
+      const newTotalPnlPercent = ((newCurrentBalance - currentStats.initial_balance) / currentStats.initial_balance) * 100;
+
+      // Calculate win rate
+      const newWinRate = newTotalTrades > 0 ? (newWinningTrades / newTotalTrades) * 100 : 0;
+
+      // Calculate average trade PNL
+      const newAvgTradePnl = newTotalTrades > 0 ? newTotalPnlSol / newTotalTrades : 0;
+
+      // Track best/worst trades
+      const newBestTrade = Math.max(currentStats.best_trade_pnl_percent, pnlPercent);
+      const newWorstTrade = Math.min(currentStats.worst_trade_pnl_percent, pnlPercent);
+
+      const { error } = await this.supabase
+        .from('bot_stats')
+        .update({
+          current_balance: newCurrentBalance,
+          total_pnl_sol: newTotalPnlSol,
+          total_pnl_percent: newTotalPnlPercent,
+          total_trades: newTotalTrades,
+          winning_trades: newWinningTrades,
+          losing_trades: newLosingTrades,
+          win_rate: newWinRate,
+          best_trade_pnl_percent: newBestTrade,
+          worst_trade_pnl_percent: newWorstTrade,
+          total_volume_sol: newTotalVolume,
+          avg_trade_pnl_percent: newAvgTradePnl,
+          last_trade_at: new Date().toISOString(),
+        })
+        .eq('mode', mode);
+
+      if (error) {
+        console.error('Failed to update bot stats:', error);
+      }
+    } catch (err) {
+      console.error('Error updating bot stats:', err);
     }
+  }
+
+  async resetBotStats(mode: 'paper' | 'live', initialBalance: number = 0.5): Promise<void> {
+    const { error } = await this.supabase
+      .from('bot_stats')
+      .update({
+        initial_balance: initialBalance,
+        current_balance: initialBalance,
+        total_pnl_sol: 0,
+        total_pnl_percent: 0,
+        total_trades: 0,
+        winning_trades: 0,
+        losing_trades: 0,
+        win_rate: 0,
+        best_trade_pnl_percent: 0,
+        worst_trade_pnl_percent: 0,
+        total_volume_sol: 0,
+        avg_trade_pnl_percent: 0,
+        last_trade_at: null,
+      })
+      .eq('mode', mode);
+
+    if (error) {
+      console.error('Failed to reset bot stats:', error);
+    }
+  }
+
+  async getOpenPositionsCount(dryRun: boolean): Promise<number> {
+    const { count, error } = await this.supabase
+      .from('trades')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'OPEN')
+      .eq('dry_run', dryRun);
+
+    if (error) return 0;
+    return count || 0;
   }
 
   // ============== LOGS CLEANUP ==============

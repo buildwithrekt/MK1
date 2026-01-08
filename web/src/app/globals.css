@@ -83,3 +83,29 @@
   background: hsl(142 70% 50%);
   box-shadow: 0 0 8px hsl(142 70% 45% / 0.6);
 }
+
+/* Cyan scrollbar for monitored tokens */
+.cyan-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(187 70% 45%) transparent;
+}
+
+.cyan-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.cyan-scrollbar::-webkit-scrollbar-track {
+  background: hsl(187 50% 10% / 0.3);
+  border-radius: 3px;
+}
+
+.cyan-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(187 70% 40% / 0.7);
+  border-radius: 3px;
+}
+
+.cyan-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: hsl(187 70% 50%);
+  box-shadow: 0 0 8px hsl(187 70% 45% / 0.6);
+}

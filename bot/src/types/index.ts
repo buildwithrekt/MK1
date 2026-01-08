@@ -47,6 +47,7 @@ export type ExitReason = 'TP' | 'SL' | 'TIMEOUT' | 'MANUAL' | 'PRE_MIGRATION' | 
 export interface ExitRules {
   stop_loss: { enabled: boolean; percent: number };
   take_profit: { enabled: boolean; trigger_percent: number; sell_percent: number };
+  post_tp_target: { enabled: boolean; min_market_cap_usd: number; max_market_cap_usd: number };
   pre_migration: { enabled: boolean; market_cap_threshold_usd: number; sell_percent: number };
   post_migration: { enabled: boolean; sell_percent: number };
   trailing_stop?: { enabled: boolean; activation_percent: number; trail_percent: number };

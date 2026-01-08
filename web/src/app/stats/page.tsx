@@ -1,0 +1,779 @@
+"use client";
+
+import { useEffect, useState, useMemo } from "react";
+import { supabase, type Trade } from "@/lib/supabase";
+import {
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  CartesianGrid,
+  BarChart,
+  Bar,
+  Cell,
+  PieChart,
+  Pie,
+  ScatterChart,
+  Scatter,
+  ZAxis,
+  ReferenceLine,
+} from "recharts";
+
+type TimeRange = "1h" | "4h" | "24h" | "7d" | "30d" | "all";
+
+interface TradeStats {
+  totalPnlPercent: number;
+  totalPnlSol: number;
+  currentBalance: number;
+  winRate: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  bestTrade: number;
+  worstTrade: number;
+}
+
+type SortKey = "token" | "amount" | "pnl" | "exit_reason" | "time" | "duration";
+type SortDirection = "asc" | "desc";
+
+export default function StatsPage() {
+  const [tradeStats, setTradeStats] = useState<TradeStats>({
+    totalPnlPercent: 0,
+    totalPnlSol: 0,
+    currentBalance: 0.5,
+    winRate: 0,
+    totalTrades: 0,
+    winningTrades: 0,
+    losingTrades: 0,
+    bestTrade: 0,
+    worstTrade: 0,
+  });
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sortKey, setSortKey] = useState<SortKey>("time");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [currentPage, setCurrentPage] = useState(1);
+  const tradesPerPage = 20;
+  const [timeRange, setTimeRange] = useState<TimeRange>("24h");
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const { data: tradesData } = await supabase
+          .from("trades")
+          .select("*")
+          .eq("dry_run", true)
+          .order("created_at", { ascending: false });
+
+        if (tradesData) {
+          setTrades(tradesData);
+        }
+
+        const { data: botStats } = await supabase
+          .from("bot_stats")
+          .select("*")
+          .eq("mode", "paper")
+          .maybeSingle();
+
+        if (botStats) {
+          setTradeStats({
+            totalPnlPercent: botStats.total_pnl_percent,
+            totalPnlSol: botStats.total_pnl_sol,
+            currentBalance: botStats.current_balance,
+            winRate: botStats.win_rate,
+            totalTrades: botStats.total_trades,
+            winningTrades: botStats.winning_trades,
+            losingTrades: botStats.losing_trades,
+            bestTrade: botStats.best_trade_pnl_percent,
+            worstTrade: botStats.worst_trade_pnl_percent,
+          });
+        }
+      } catch (error) {
+        console.error("Failed to fetch stats:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+    const interval = setInterval(fetchData, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Closed trades only for analytics
+  const closedTrades = useMemo(() =>
+    trades.filter(t => t.status === "CLOSED" && t.pnl_sol !== null),
+  [trades]);
+
+  // Time range filter
+  const getTimeRangeMs = (range: TimeRange): number => {
+    switch (range) {
+      case "1h": return 60 * 60 * 1000;
+      case "4h": return 4 * 60 * 60 * 1000;
+      case "24h": return 24 * 60 * 60 * 1000;
+      case "7d": return 7 * 24 * 60 * 60 * 1000;
+      case "30d": return 30 * 24 * 60 * 60 * 1000;
+      case "all": return Infinity;
+    }
+  };
+
+  // Filtered trades by time range
+  const timeFilteredTrades = useMemo(() => {
+    const now = Date.now();
+    const rangeMs = getTimeRangeMs(timeRange);
+    if (rangeMs === Infinity) return closedTrades;
+    return closedTrades.filter(t => {
+      const tradeTime = new Date(t.exit_time || t.created_at).getTime();
+      return now - tradeTime <= rangeMs;
+    });
+  }, [closedTrades, timeRange]);
+
+  // Scatter chart data - trades over time with PnL
+  const tradeTimelineData = useMemo(() => {
+    return timeFilteredTrades.map(trade => {
+      const exitTime = new Date(trade.exit_time || trade.created_at);
+      return {
+        time: exitTime.getTime(),
+        pnl: trade.pnl_percent || 0,
+        pnlSol: trade.pnl_sol || 0,
+        token: trade.token_name || trade.token_address.slice(0, 8),
+        amount: trade.amount_sol,
+        isWin: (trade.pnl_sol || 0) > 0,
+        exitReason: trade.exit_reason || "TIMEOUT",
+      };
+    }).sort((a, b) => a.time - b.time);
+  }, [timeFilteredTrades]);
+
+  // Stats for the selected time range
+  const timeRangeStats = useMemo(() => {
+    const wins = timeFilteredTrades.filter(t => (t.pnl_sol || 0) > 0);
+    const totalPnl = timeFilteredTrades.reduce((sum, t) => sum + (t.pnl_sol || 0), 0);
+    const winRate = timeFilteredTrades.length > 0 ? (wins.length / timeFilteredTrades.length) * 100 : 0;
+    return {
+      count: timeFilteredTrades.length,
+      wins: wins.length,
+      losses: timeFilteredTrades.length - wins.length,
+      totalPnl,
+      winRate,
+    };
+  }, [timeFilteredTrades]);
+
+  // Calculate trade duration in minutes
+  const getTradeMinutes = (trade: Trade) => {
+    if (!trade.entry_time || !trade.exit_time) return 0;
+    return (new Date(trade.exit_time).getTime() - new Date(trade.entry_time).getTime()) / 60000;
+  };
+
+  // Cumulative PNL data for equity curve
+  const equityCurveData = useMemo(() => {
+    if (closedTrades.length === 0) return [];
+
+    const sorted = [...closedTrades].sort(
+      (a, b) => new Date(a.exit_time!).getTime() - new Date(b.exit_time!).getTime()
+    );
+
+    let cumulative = 0.5; // Starting balance
+    return sorted.map((trade, idx) => {
+      cumulative += trade.pnl_sol || 0;
+      return {
+        trade: idx + 1,
+        balance: cumulative,
+        pnl: trade.pnl_sol || 0,
+        token: trade.token_name || trade.token_address.slice(0, 6),
+      };
+    });
+  }, [closedTrades]);
+
+  // PNL by exit reason
+  const exitReasonStats = useMemo(() => {
+    const stats: Record<string, { count: number; totalPnl: number; wins: number }> = {
+      TP: { count: 0, totalPnl: 0, wins: 0 },
+      SL: { count: 0, totalPnl: 0, wins: 0 },
+      TIMEOUT: { count: 0, totalPnl: 0, wins: 0 },
+    };
+
+    closedTrades.forEach(trade => {
+      const reason = trade.exit_reason || "TIMEOUT";
+      if (stats[reason]) {
+        stats[reason].count++;
+        stats[reason].totalPnl += trade.pnl_percent || 0;
+        if ((trade.pnl_sol || 0) > 0) stats[reason].wins++;
+      }
+    });
+
+    return Object.entries(stats).map(([reason, data]) => ({
+      reason,
+      avgPnl: data.count > 0 ? data.totalPnl / data.count : 0,
+      count: data.count,
+      winRate: data.count > 0 ? (data.wins / data.count) * 100 : 0,
+    }));
+  }, [closedTrades]);
+
+  // Trade duration stats
+  const durationStats = useMemo(() => {
+    if (closedTrades.length === 0) return { avg: 0, min: 0, max: 0 };
+
+    const durations = closedTrades.map(getTradeMinutes).filter(d => d > 0);
+    if (durations.length === 0) return { avg: 0, min: 0, max: 0 };
+
+    const avg = durations.reduce((a, b) => a + b, 0) / durations.length;
+
+    return {
+      avg,
+      min: Math.min(...durations),
+      max: Math.max(...durations),
+    };
+  }, [closedTrades]);
+
+  // Advanced metrics
+  const advancedMetrics = useMemo(() => {
+    const wins = closedTrades.filter(t => (t.pnl_sol || 0) > 0);
+    const losses = closedTrades.filter(t => (t.pnl_sol || 0) <= 0);
+
+    const avgWin = wins.length > 0
+      ? wins.reduce((sum, t) => sum + (t.pnl_percent || 0), 0) / wins.length
+      : 0;
+    const avgLoss = losses.length > 0
+      ? Math.abs(losses.reduce((sum, t) => sum + (t.pnl_percent || 0), 0) / losses.length)
+      : 0;
+
+    const totalWinSol = wins.reduce((sum, t) => sum + (t.pnl_sol || 0), 0);
+    const totalLossSol = Math.abs(losses.reduce((sum, t) => sum + (t.pnl_sol || 0), 0));
+
+    const profitFactor = totalLossSol > 0 ? totalWinSol / totalLossSol : totalWinSol > 0 ? 999 : 0;
+
+    const expectancy = closedTrades.length > 0
+      ? closedTrades.reduce((sum, t) => sum + (t.pnl_sol || 0), 0) / closedTrades.length
+      : 0;
+
+    return { avgWin, avgLoss, profitFactor, expectancy };
+  }, [closedTrades]);
+
+  // PNL distribution histogram
+  const pnlDistribution = useMemo(() => {
+    const buckets: Record<string, number> = {
+      "< -20%": 0,
+      "-20 to -10%": 0,
+      "-10 to -5%": 0,
+      "-5 to 0%": 0,
+      "0 to 5%": 0,
+      "5 to 10%": 0,
+      "10 to 20%": 0,
+      "> 20%": 0,
+    };
+
+    closedTrades.forEach(trade => {
+      const pnl = trade.pnl_percent || 0;
+      if (pnl < -20) buckets["< -20%"]++;
+      else if (pnl < -10) buckets["-20 to -10%"]++;
+      else if (pnl < -5) buckets["-10 to -5%"]++;
+      else if (pnl < 0) buckets["-5 to 0%"]++;
+      else if (pnl < 5) buckets["0 to 5%"]++;
+      else if (pnl < 10) buckets["5 to 10%"]++;
+      else if (pnl < 20) buckets["10 to 20%"]++;
+      else buckets["> 20%"]++;
+    });
+
+    return Object.entries(buckets).map(([range, count]) => ({ range, count }));
+  }, [closedTrades]);
+
+  // Win/Loss pie data
+  const winLossPieData = useMemo(() => [
+    { name: "Wins", value: tradeStats.winningTrades, color: "#22c55e" },
+    { name: "Losses", value: tradeStats.losingTrades, color: "#ef4444" },
+  ], [tradeStats]);
+
+  // Exit reason pie data
+  const exitReasonPieData = useMemo(() => {
+    const counts: Record<string, number> = { TP: 0, SL: 0, TIMEOUT: 0 };
+    closedTrades.forEach(t => {
+      const reason = t.exit_reason || "TIMEOUT";
+      if (counts[reason] !== undefined) counts[reason]++;
+    });
+    return [
+      { name: "Take Profit", value: counts.TP, color: "#22c55e" },
+      { name: "Stop Loss", value: counts.SL, color: "#ef4444" },
+      { name: "Timeout", value: counts.TIMEOUT, color: "#f59e0b" },
+    ];
+  }, [closedTrades]);
+
+  // Sorted trades
+  const sortedTrades = useMemo(() => {
+    return [...closedTrades].sort((a, b) => {
+      let aVal: number | string = 0;
+      let bVal: number | string = 0;
+
+      switch (sortKey) {
+        case "token":
+          aVal = a.token_name || a.token_address;
+          bVal = b.token_name || b.token_address;
+          break;
+        case "amount":
+          aVal = a.amount_sol;
+          bVal = b.amount_sol;
+          break;
+        case "pnl":
+          aVal = a.pnl_percent ?? -Infinity;
+          bVal = b.pnl_percent ?? -Infinity;
+          break;
+        case "exit_reason":
+          aVal = a.exit_reason || "";
+          bVal = b.exit_reason || "";
+          break;
+        case "duration":
+          aVal = getTradeMinutes(a);
+          bVal = getTradeMinutes(b);
+          break;
+        case "time":
+          aVal = new Date(a.created_at).getTime();
+          bVal = new Date(b.created_at).getTime();
+          break;
+      }
+
+      if (typeof aVal === "string" && typeof bVal === "string") {
+        return sortDirection === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+      }
+      return sortDirection === "asc" ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
+    });
+  }, [closedTrades, sortKey, sortDirection]);
+
+  const totalPages = Math.ceil(sortedTrades.length / tradesPerPage);
+  const paginatedTrades = sortedTrades.slice((currentPage - 1) * tradesPerPage, currentPage * tradesPerPage);
+
+  useEffect(() => { setCurrentPage(1); }, [sortKey, sortDirection]);
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDirection(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDirection("desc"); }
+  };
+
+  const formatDuration = (mins: number) => {
+    if (mins < 1) return "< 1m";
+    if (mins < 60) return `${mins.toFixed(0)}m`;
+    return `${(mins / 60).toFixed(1)}h`;
+  };
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-black text-green-400 p-8 flex items-center justify-center">
+        <div className="animate-pulse text-2xl font-mono">Loading analytics...</div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-black text-green-400 p-6 font-mono">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="border-b-2 border-green-500/30 pb-4">
+          <h1 className="text-3xl font-bold text-green-400 drop-shadow-[0_0_10px_rgba(34,197,94,0.5)]">
+            MK1 ANALYTICS
+          </h1>
+          <p className="text-green-600 text-sm mt-1">
+            {closedTrades.length} closed trades analyzed
+          </p>
+        </div>
+
+        {/* Main Stats Row */}
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-4 lg:grid-cols-8">
+          <StatCard label="BALANCE" value={`${tradeStats.currentBalance.toFixed(3)}`} unit="SOL" color={tradeStats.totalPnlSol >= 0 ? "green" : "red"} />
+          <StatCard label="TOTAL PNL" value={`${tradeStats.totalPnlSol >= 0 ? "+" : ""}${tradeStats.totalPnlSol.toFixed(3)}`} unit="SOL" color={tradeStats.totalPnlSol >= 0 ? "green" : "red"} />
+          <StatCard label="PNL %" value={`${tradeStats.totalPnlPercent >= 0 ? "+" : ""}${tradeStats.totalPnlPercent.toFixed(1)}`} unit="%" color={tradeStats.totalPnlPercent >= 0 ? "green" : "red"} />
+          <StatCard label="WIN RATE" value={tradeStats.winRate.toFixed(1)} unit="%" color="cyan" />
+          <StatCard label="AVG WIN" value={`+${advancedMetrics.avgWin.toFixed(1)}`} unit="%" color="green" />
+          <StatCard label="AVG LOSS" value={`-${advancedMetrics.avgLoss.toFixed(1)}`} unit="%" color="red" />
+          <StatCard label="PROFIT FACTOR" value={advancedMetrics.profitFactor >= 100 ? "∞" : advancedMetrics.profitFactor.toFixed(2)} unit="" color={advancedMetrics.profitFactor >= 1 ? "green" : "red"} />
+          <StatCard label="EXPECTANCY" value={`${advancedMetrics.expectancy >= 0 ? "+" : ""}${(advancedMetrics.expectancy * 1000).toFixed(1)}`} unit="mSOL" color={advancedMetrics.expectancy >= 0 ? "green" : "red"} />
+        </div>
+
+        {/* Interactive Trade Timeline */}
+        <div className="border-2 border-cyan-500/30 rounded-lg bg-black/50 p-4">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-sm font-bold text-cyan-400">TRADE TIMELINE</h2>
+              <p className="text-xs text-cyan-600 mt-1">
+                {timeRangeStats.count} trades • {timeRangeStats.wins}W / {timeRangeStats.losses}L •
+                <span className={timeRangeStats.totalPnl >= 0 ? " text-green-400" : " text-red-400"}>
+                  {" "}{timeRangeStats.totalPnl >= 0 ? "+" : ""}{timeRangeStats.totalPnl.toFixed(4)} SOL
+                </span>
+                {" "}• {timeRangeStats.winRate.toFixed(0)}% WR
+              </p>
+            </div>
+            <div className="flex gap-1">
+              {(["1h", "4h", "24h", "7d", "30d", "all"] as TimeRange[]).map((range) => (
+                <button
+                  key={range}
+                  onClick={() => setTimeRange(range)}
+                  className={`px-2 py-1 text-xs rounded border transition-colors ${
+                    timeRange === range
+                      ? "bg-cyan-500/30 border-cyan-500 text-cyan-300"
+                      : "bg-black/50 border-cyan-500/30 text-cyan-600 hover:border-cyan-500/60 hover:text-cyan-400"
+                  }`}
+                >
+                  {range.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {tradeTimelineData.length > 0 ? (
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#06b6d4" strokeOpacity={0.1} />
+                  <XAxis
+                    dataKey="time"
+                    type="number"
+                    domain={["dataMin", "dataMax"]}
+                    stroke="#06b6d4"
+                    fontSize={10}
+                    tickFormatter={(ts) => {
+                      const d = new Date(ts);
+                      if (timeRange === "1h" || timeRange === "4h") {
+                        return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+                      }
+                      if (timeRange === "24h") {
+                        return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+                      }
+                      return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                    }}
+                  />
+                  <YAxis
+                    dataKey="pnl"
+                    stroke="#06b6d4"
+                    fontSize={10}
+                    tickFormatter={(v) => `${v > 0 ? "+" : ""}${v.toFixed(0)}%`}
+                    domain={["auto", "auto"]}
+                  />
+                  <ZAxis dataKey="amount" range={[50, 200]} />
+                  <ReferenceLine y={0} stroke="#06b6d4" strokeOpacity={0.5} strokeDasharray="5 5" />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "#000", border: "1px solid #06b6d4", borderRadius: "8px" }}
+                    formatter={(value, name) => {
+                      if (name === "pnl") return [`${Number(value) >= 0 ? "+" : ""}${Number(value).toFixed(1)}%`, "PNL"];
+                      return [value, name];
+                    }}
+                    labelFormatter={(ts) => new Date(ts).toLocaleString()}
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length > 0) {
+                        const data = payload[0].payload;
+                        return (
+                          <div className="bg-black border border-cyan-500 rounded-lg p-2 text-xs">
+                            <div className="text-cyan-400 font-bold">{data.token}</div>
+                            <div className="text-zinc-400">{new Date(data.time).toLocaleString()}</div>
+                            <div className={data.isWin ? "text-green-400" : "text-red-400"}>
+                              PNL: {data.pnl >= 0 ? "+" : ""}{data.pnl.toFixed(1)}% ({data.pnlSol >= 0 ? "+" : ""}{data.pnlSol.toFixed(4)} SOL)
+                            </div>
+                            <div className="text-purple-400">Amount: {data.amount.toFixed(3)} SOL</div>
+                            <div className={`text-xs ${data.exitReason === "TP" ? "text-green-500" : data.exitReason === "SL" ? "text-red-500" : "text-orange-500"}`}>
+                              Exit: {data.exitReason}
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Scatter data={tradeTimelineData}>
+                    {tradeTimelineData.map((entry, index) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={entry.isWin ? "#22c55e" : "#ef4444"}
+                        stroke={entry.exitReason === "TP" ? "#22c55e" : entry.exitReason === "SL" ? "#ef4444" : "#f59e0b"}
+                        strokeWidth={2}
+                      />
+                    ))}
+                  </Scatter>
+                </ScatterChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="h-72 flex items-center justify-center text-cyan-600">
+              No trades in selected time range
+            </div>
+          )}
+
+          {/* Legend */}
+          <div className="flex justify-center gap-6 mt-3 text-xs">
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 rounded-full bg-green-500" />
+              <span className="text-green-400">Profit</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 rounded-full bg-red-500" />
+              <span className="text-red-400">Loss</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 rounded-full border-2 border-green-500 bg-transparent" />
+              <span className="text-zinc-500">TP exit</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 rounded-full border-2 border-red-500 bg-transparent" />
+              <span className="text-zinc-500">SL exit</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 rounded-full border-2 border-orange-500 bg-transparent" />
+              <span className="text-zinc-500">Timeout exit</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Charts Row 1: Equity Curve + Pies */}
+        <div className="grid gap-4 lg:grid-cols-3">
+          {/* Equity Curve */}
+          <div className="lg:col-span-2 border-2 border-green-500/30 rounded-lg bg-black/50 p-4">
+            <h2 className="text-sm font-bold text-green-400 mb-3">EQUITY CURVE</h2>
+            {equityCurveData.length > 0 ? (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={equityCurveData}>
+                    <defs>
+                      <linearGradient id="equityGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4} />
+                        <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#22c55e" strokeOpacity={0.1} />
+                    <XAxis dataKey="trade" stroke="#22c55e" fontSize={10} />
+                    <YAxis stroke="#22c55e" fontSize={10} domain={['auto', 'auto']} tickFormatter={(v) => `${v.toFixed(2)}`} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: "#000", border: "1px solid #22c55e", borderRadius: "8px" }}
+                      labelFormatter={(v) => `Trade #${v}`}
+                      formatter={(value) => [`${Number(value).toFixed(4)} SOL`, "Balance"]}
+                    />
+                    <Area type="monotone" dataKey="balance" stroke="#22c55e" strokeWidth={2} fill="url(#equityGradient)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-green-600">No trades yet</div>
+            )}
+          </div>
+
+          {/* Win/Loss + Exit Reason Pies */}
+          <div className="border-2 border-green-500/30 rounded-lg bg-black/50 p-4 space-y-4">
+            <div>
+              <h2 className="text-sm font-bold text-green-400 mb-2">WIN / LOSS</h2>
+              <div className="h-32">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={winLossPieData} dataKey="value" cx="50%" cy="50%" innerRadius={25} outerRadius={45} paddingAngle={2}>
+                      {winLossPieData.map((entry, idx) => <Cell key={idx} fill={entry.color} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #22c55e" }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex justify-center gap-4 text-xs">
+                <span className="text-green-400">{tradeStats.winningTrades}W</span>
+                <span className="text-red-400">{tradeStats.losingTrades}L</span>
+              </div>
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-green-400 mb-2">EXIT REASONS</h2>
+              <div className="h-32">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={exitReasonPieData} dataKey="value" cx="50%" cy="50%" innerRadius={25} outerRadius={45} paddingAngle={2}>
+                      {exitReasonPieData.map((entry, idx) => <Cell key={idx} fill={entry.color} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #22c55e" }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex justify-center gap-3 text-xs">
+                <span className="text-green-400">TP: {exitReasonPieData[0].value}</span>
+                <span className="text-red-400">SL: {exitReasonPieData[1].value}</span>
+                <span className="text-orange-400">TO: {exitReasonPieData[2].value}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Charts Row 2: PNL Distribution + Exit Reason Performance */}
+        <div className="grid gap-4 lg:grid-cols-2">
+          {/* PNL Distribution */}
+          <div className="border-2 border-purple-500/30 rounded-lg bg-black/50 p-4">
+            <h2 className="text-sm font-bold text-purple-400 mb-3">PNL DISTRIBUTION</h2>
+            <div className="h-48">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={pnlDistribution}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#a855f7" strokeOpacity={0.1} />
+                  <XAxis dataKey="range" stroke="#a855f7" fontSize={9} angle={-45} textAnchor="end" height={60} />
+                  <YAxis stroke="#a855f7" fontSize={10} allowDecimals={false} />
+                  <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #a855f7" }} />
+                  <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                    {pnlDistribution.map((entry, idx) => (
+                      <Cell key={idx} fill={entry.range.includes("-") ? "#ef4444" : "#22c55e"} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Exit Reason Performance */}
+          <div className="border-2 border-orange-500/30 rounded-lg bg-black/50 p-4">
+            <h2 className="text-sm font-bold text-orange-400 mb-3">PERFORMANCE BY EXIT</h2>
+            <div className="grid grid-cols-3 gap-3">
+              {exitReasonStats.map(stat => (
+                <div key={stat.reason} className="text-center p-3 rounded-lg bg-black/50 border border-orange-500/20">
+                  <div className={`text-lg font-bold ${stat.reason === "TP" ? "text-green-400" : stat.reason === "SL" ? "text-red-400" : "text-orange-400"}`}>
+                    {stat.reason}
+                  </div>
+                  <div className="text-xs text-zinc-500 mt-1">Count</div>
+                  <div className="text-sm text-white">{stat.count}</div>
+                  <div className="text-xs text-zinc-500 mt-1">Avg PNL</div>
+                  <div className={`text-sm font-bold ${stat.avgPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {stat.avgPnl >= 0 ? "+" : ""}{stat.avgPnl.toFixed(1)}%
+                  </div>
+                  <div className="text-xs text-zinc-500 mt-1">Win Rate</div>
+                  <div className="text-sm text-cyan-400">{stat.winRate.toFixed(0)}%</div>
+                </div>
+              ))}
+            </div>
+            {/* Duration Stats */}
+            <div className="mt-4 pt-4 border-t border-orange-500/20">
+              <h3 className="text-xs text-orange-400 mb-2">TRADE DURATION</h3>
+              <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                <div>
+                  <div className="text-zinc-500">Average</div>
+                  <div className="text-white font-bold">{formatDuration(durationStats.avg)}</div>
+                </div>
+                <div>
+                  <div className="text-zinc-500">Shortest</div>
+                  <div className="text-cyan-400 font-bold">{formatDuration(durationStats.min)}</div>
+                </div>
+                <div>
+                  <div className="text-zinc-500">Longest</div>
+                  <div className="text-purple-400 font-bold">{formatDuration(durationStats.max)}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Trades Table */}
+        <div className="border-2 border-green-500/30 rounded-lg bg-black/50 overflow-hidden">
+          <div className="px-4 py-3 border-b border-green-500/30 flex items-center justify-between">
+            <h2 className="text-sm font-bold text-green-400">
+              TRADE HISTORY <span className="text-green-600 font-normal">({sortedTrades.length})</span>
+            </h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-green-900/20 text-green-500">
+                  <th className="px-3 py-2 text-left cursor-pointer hover:text-green-300" onClick={() => handleSort("token")}>
+                    Token {sortKey === "token" && (sortDirection === "asc" ? "▲" : "▼")}
+                  </th>
+                  <th className="px-3 py-2 text-right cursor-pointer hover:text-green-300" onClick={() => handleSort("amount")}>
+                    Amount {sortKey === "amount" && (sortDirection === "asc" ? "▲" : "▼")}
+                  </th>
+                  <th className="px-3 py-2 text-right cursor-pointer hover:text-green-300" onClick={() => handleSort("pnl")}>
+                    PNL % {sortKey === "pnl" && (sortDirection === "asc" ? "▲" : "▼")}
+                  </th>
+                  <th className="px-3 py-2 text-right">PNL SOL</th>
+                  <th className="px-3 py-2 text-right cursor-pointer hover:text-green-300" onClick={() => handleSort("exit_reason")}>
+                    Exit {sortKey === "exit_reason" && (sortDirection === "asc" ? "▲" : "▼")}
+                  </th>
+                  <th className="px-3 py-2 text-right cursor-pointer hover:text-green-300" onClick={() => handleSort("duration")}>
+                    Duration {sortKey === "duration" && (sortDirection === "asc" ? "▲" : "▼")}
+                  </th>
+                  <th className="px-3 py-2 text-right cursor-pointer hover:text-green-300" onClick={() => handleSort("time")}>
+                    Time {sortKey === "time" && (sortDirection === "asc" ? "▲" : "▼")}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedTrades.map((trade) => {
+                  const pnlColor = (trade.pnl_percent || 0) >= 0 ? "text-green-400" : "text-red-400";
+                  const duration = getTradeMinutes(trade);
+
+                  return (
+                    <tr key={trade.id} className="border-t border-green-500/10 hover:bg-green-900/10">
+                      <td className="px-3 py-2">
+                        <a href={`https://pump.fun/coin/${trade.token_address}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 hover:opacity-80">
+                          <div className="w-6 h-6 rounded-full bg-green-900/30 overflow-hidden shrink-0 border border-green-500/30">
+                            {trade.image_uri ? (
+                              <img src={trade.image_uri} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-green-500 text-[8px]">
+                                {(trade.token_name || trade.token_address).slice(0, 2)}
+                              </div>
+                            )}
+                          </div>
+                          <span className="text-green-400 hover:underline truncate max-w-[80px]">
+                            {trade.token_name || trade.token_address.slice(0, 8)}
+                          </span>
+                        </a>
+                      </td>
+                      <td className="px-3 py-2 text-right text-purple-400">{trade.amount_sol.toFixed(3)}</td>
+                      <td className={`px-3 py-2 text-right font-bold ${pnlColor}`}>
+                        {(trade.pnl_percent || 0) >= 0 ? "+" : ""}{(trade.pnl_percent || 0).toFixed(1)}%
+                      </td>
+                      <td className={`px-3 py-2 text-right ${pnlColor}`}>
+                        {(trade.pnl_sol || 0) >= 0 ? "+" : ""}{(trade.pnl_sol || 0).toFixed(4)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                          trade.exit_reason === "TP" ? "bg-green-500/20 text-green-400" :
+                          trade.exit_reason === "SL" ? "bg-red-500/20 text-red-400" :
+                          "bg-orange-500/20 text-orange-400"
+                        }`}>
+                          {trade.exit_reason || "TO"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right text-zinc-400">{formatDuration(duration)}</td>
+                      <td className="px-3 py-2 text-right text-green-600 whitespace-nowrap">
+                        {new Date(trade.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="px-4 py-3 border-t border-green-500/30 flex items-center justify-between text-xs">
+              <span className="text-green-600">
+                {(currentPage - 1) * tradesPerPage + 1}-{Math.min(currentPage * tradesPerPage, sortedTrades.length)} of {sortedTrades.length}
+              </span>
+              <div className="flex gap-1">
+                <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1} className="px-2 py-1 rounded bg-green-900/30 text-green-400 hover:bg-green-900/50 disabled:opacity-30 border border-green-500/30">««</button>
+                <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-2 py-1 rounded bg-green-900/30 text-green-400 hover:bg-green-900/50 disabled:opacity-30 border border-green-500/30">‹</button>
+                <span className="px-3 py-1 text-green-400">{currentPage}/{totalPages}</span>
+                <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-2 py-1 rounded bg-green-900/30 text-green-400 hover:bg-green-900/50 disabled:opacity-30 border border-green-500/30">›</button>
+                <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} className="px-2 py-1 rounded bg-green-900/30 text-green-400 hover:bg-green-900/50 disabled:opacity-30 border border-green-500/30">»»</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function StatCard({ label, value, unit, color }: { label: string; value: string; unit: string; color: "green" | "red" | "cyan" | "purple" | "orange" | "yellow" }) {
+  const colors = {
+    green: "text-green-400 border-green-500/40",
+    red: "text-red-400 border-red-500/40",
+    cyan: "text-cyan-400 border-cyan-500/40",
+    purple: "text-purple-400 border-purple-500/40",
+    orange: "text-orange-400 border-orange-500/40",
+    yellow: "text-yellow-400 border-yellow-500/40",
+  };
+
+  return (
+    <div className={`rounded-lg border ${colors[color]} bg-black/50 p-3`}>
+      <div className="text-[10px] text-zinc-500 uppercase">{label}</div>
+      <div className={`text-lg font-bold ${colors[color].split(" ")[0]}`}>
+        {value}<span className="text-xs ml-1 opacity-70">{unit}</span>
+      </div>
+    </div>
+  );
+}

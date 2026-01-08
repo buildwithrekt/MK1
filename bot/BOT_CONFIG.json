@@ -23,16 +23,21 @@
     "take_profit": {
       "enabled": true,
       "trigger_percent": 50,
-      "sell_percent": 50
+      "sell_percent": 30
+    },
+    "post_tp_target": {
+      "enabled": true,
+      "min_market_cap_usd": 50000,
+      "max_market_cap_usd": 65000
     },
     "pre_migration": {
-      "enabled": true,
-      "market_cap_threshold_usd": 40000,
+      "enabled": false,
+      "market_cap_threshold_usd": 60000,
       "sell_percent": 100
     },
     "post_migration": {
-      "enabled": false,
-      "sell_percent": 50
+      "enabled": true,
+      "sell_percent": 70
     },
     "trailing_stop": {
       "enabled": true,

@@ -16,13 +16,13 @@ const ASCII_LOGO = `
 
 const NAV_ITEMS = [
   { href: "/", label: "DASHBOARD" },
+  { href: "/stats", label: "STATS" },
   { href: "/docs", label: "DOCS" },
 ];
 
 export function Navbar() {
   const pathname = usePathname();
   const [config, setConfig] = useState<BotConfig | null>(null);
-  const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
     const fetchConfig = async () => {
@@ -36,8 +36,6 @@ export function Navbar() {
 
     fetchConfig();
 
-    const nowInterval = setInterval(() => setNow(Date.now()), 5000);
-
     const configChannel = supabase
       .channel("navbar_config")
       .on(
@@ -50,14 +48,9 @@ export function Navbar() {
       .subscribe();
 
     return () => {
-      clearInterval(nowInterval);
       supabase.removeChannel(configChannel);
     };
   }, []);
-
-  const isOnline = config?.last_heartbeat
-    ? now - new Date(config.last_heartbeat).getTime() < 60000
-    : false;
 
   return (
     <header className="border-b-2 border-green-500/50 bg-black/90">
@@ -92,31 +85,17 @@ export function Navbar() {
               );
             })}
           </nav>
-          <div className="flex items-center gap-4">
-            {config && (
-              <span
-                className={`text-xs px-2 py-1 rounded border ${
-                  config.dry_run
-                    ? "border-yellow-500 text-yellow-400 bg-yellow-500/10"
-                    : "border-red-500 text-red-400 bg-red-500/10 animate-pulse"
-                }`}
-              >
-                {config.dry_run ? "◉ PAPER MODE" : "◉ LIVE MODE"}
-              </span>
-            )}
-            <div className="flex items-center gap-2 text-xs">
-              <div
-                className={`w-2 h-2 rounded-full ${
-                  isOnline
-                    ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)] animate-pulse"
-                    : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"
-                }`}
-              />
-              <span className={isOnline ? "text-green-400" : "text-red-400"}>
-                {isOnline ? "ONLINE" : "OFFLINE"}
-              </span>
-            </div>
-          </div>
+          {config && (
+            <span
+              className={`text-xs px-2 py-1 rounded border ${
+                config.dry_run
+                  ? "border-yellow-500 text-yellow-400 bg-yellow-500/10"
+                  : "border-red-500 text-red-400 bg-red-500/10 animate-pulse"
+              }`}
+            >
+              {config.dry_run ? "◉ PAPER MODE" : "◉ LIVE MODE"}
+            </span>
+          )}
         </div>
       </div>
     </header>

@@ -30,6 +30,7 @@ export interface Trade {
   token_address: string;
   token_name: string | null;
   bonding_curve: string | null;
+  image_uri: string | null;
   entry_price: number;
   entry_time: string;
   exit_price: number | null;
@@ -55,7 +56,6 @@ export interface BotConfig {
   timeout_minutes: number;
   timeout_threshold: number;
   updated_at: string;
-  last_heartbeat: string | null;
 }
 
 export interface BotLog {
@@ -63,4 +63,24 @@ export interface BotLog {
   type: 'INFO' | 'WARN' | 'WARNING' | 'ERROR' | 'TRADE';
   message: string;
   created_at: string;
+}
+
+export interface BotStats {
+  id: string;
+  mode: 'paper' | 'live';
+  initial_balance: number;
+  current_balance: number;
+  total_pnl_sol: number;
+  total_pnl_percent: number;
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate: number;
+  best_trade_pnl_percent: number;
+  worst_trade_pnl_percent: number;
+  total_volume_sol: number;
+  avg_trade_pnl_percent: number;
+  last_trade_at: string | null;
+  created_at: string;
+  updated_at: string;
 }

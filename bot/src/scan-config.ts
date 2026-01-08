@@ -35,9 +35,7 @@ export interface ScanConfig {
     errors: boolean;
   };
   database: {
-    save_passed_tokens: boolean;
     save_logs: boolean;
-    max_passed_tokens: number;
     max_logs: number;
   };
   terminal: {
@@ -95,9 +93,7 @@ export function loadScanConfig(forceReload = false): ScanConfig {
         errors: true,
       },
       database: {
-        save_passed_tokens: true,
         save_logs: true,
-        max_passed_tokens: 50,
         max_logs: 500,
       },
       terminal: {

@@ -9,7 +9,7 @@ import { getDatabase } from './services/database.js';
 import { priceService } from './services/price.js';
 import { logger } from './utils/logger.js';
 import { CONFIG_POLL_INTERVAL, PRICE_CHECK_INTERVAL } from './constants.js';
-import { fetchAndValidateToken } from './services/birdeye.js';
+import { fetchAndValidateToken, fetchTokenLogo } from './services/birdeye.js';
 import type { BotConfig, ExitRules } from './types/index.js';
 
 // Token being monitored in memory (NOT saved to DB until it passes filters)
@@ -20,6 +20,7 @@ interface MonitoredToken {
   name: string;
   symbol: string;
   uri: string;
+  logoUri: string | null; // Actual image URL from Birdeye
   createdAt: number;
   lastUpdate: number;
   buys: { solAmount: number; user: string }[];
@@ -87,7 +88,6 @@ async function main() {
     db = getDatabase();
     // Set database limits from config
     db.setMaxLogs(scanConfig.database.max_logs);
-    db.setMaxPassedTokens(scanConfig.database.max_passed_tokens);
     console.log('✅ Database enabled');
   } else {
     console.log('⚠️  Database disabled');
@@ -232,25 +232,17 @@ async function main() {
       if (birdeyeResult.data) {
         const be = birdeyeResult.data;
         logger.info(`✅ PASS ${token.symbol} | Liq: $${be.liquidity.toFixed(0)} | Progress: ${be.meme_info.progress_percent.toFixed(1)}%`);
+
+        // Use Birdeye logo if we don't have one yet
+        if (!token.logoUri && be.logo_uri) {
+          token.logoUri = be.logo_uri;
+        }
       }
     }
 
     const marketCapUsd = priceService.solToUsd(token.marketCapSol);
     const buyVolumeUsd = priceService.solToUsd(token.totalBuyVolume);
     const uniqueBuyers = token.uniqueBuyers.size;
-
-    // Save to DB - token passed all filters
-    if (db && scanConfig.database.save_passed_tokens) {
-      await db.savePassedToken({
-        mint: token.mint,
-        name: token.name,
-        symbol: token.symbol,
-        marketCapUsd,
-        buyVolumeUsd,
-        uniqueBuyers,
-        status: 'PASSED',
-      });
-    }
 
     // Sound alert
     process.stdout.write('\x07');
@@ -272,13 +264,9 @@ async function main() {
       token.lastPrice,
       amountSol,
       buyResult.tokenAmount!,
-      marketCapUsd
+      marketCapUsd,
+      token.logoUri || undefined
     );
-
-    // Update DB status
-    if (db) {
-      await db.updatePassedTokenStatus(token.mint, 'ENTERED');
-    }
 
     // Keep subscribed for position monitoring
   };
@@ -318,13 +306,14 @@ async function main() {
     }
 
     // Start monitoring (in memory only - NO DB save yet)
-    monitoringTokens.set(data.mint, {
+    const token: MonitoredToken = {
       mint: data.mint,
       creator: data.traderPublicKey,
       bondingCurve: data.bondingCurveKey,
       name: data.name || tokenName,
       symbol: data.symbol || tokenName,
       uri: data.uri,
+      logoUri: null,
       createdAt: Date.now(),
       lastUpdate: Date.now(),
       buys: [],
@@ -336,7 +325,16 @@ async function main() {
       marketCapSol: data.marketCapSol,
       devSold: false,
       entryAttempted: false,
-    });
+    };
+
+    monitoringTokens.set(data.mint, token);
+
+    // Fetch logo in background - tries metadata URI first, then Birdeye
+    fetchTokenLogo(data.mint, data.uri).then(logoUri => {
+      if (logoUri && monitoringTokens.has(data.mint)) {
+        token.logoUri = logoUri;
+      }
+    }).catch(() => {});
 
     // Subscribe to trades
     pumpPortal.subscribeTokenTrades([data.mint]);
@@ -552,7 +550,7 @@ async function main() {
             mint: token.mint,
             name: token.name,
             symbol: token.symbol,
-            imageUri: token.uri,
+            imageUri: token.logoUri || undefined, // Use actual logo from Birdeye, not metadata URI
             creator: token.creator,
             bondingCurve: token.bondingCurve,
             marketCapSol: token.marketCapSol,
@@ -575,22 +573,10 @@ async function main() {
         if (tokensToSync.length > 0) {
           await db!.bulkUpsertMonitoredTokens(tokensToSync);
         }
-      } catch {
-        // Silently fail
+      } catch (err) {
+        console.error('❌ Failed to sync monitored tokens:', (err as Error).message);
       }
     }, 10000); // Every 10 seconds
-  }
-
-  // Heartbeat
-  if (db) {
-    await db.sendHeartbeat();
-    setInterval(async () => {
-      try {
-        await db!.sendHeartbeat();
-      } catch {
-        // Ignore
-      }
-    }, CONFIG_POLL_INTERVAL);
   }
 
   // Connect

@@ -6,21 +6,21 @@
   },
   "monitoring": {
     "min_initial_market_cap_usd": 4000,
-    "monitoring_duration_seconds": 300,
-    "max_tokens_monitored": 125
+    "monitoring_duration_seconds": 480,
+    "max_tokens_monitored": 200
   },
   "entry_filters": {
     "dev_must_sell": true,
     "min_market_cap_usd": 6000,
     "max_market_cap_usd": 45000,
-    "min_buy_volume_usd": 5000,
+    "min_buy_volume_usd": 2000,
     "min_unique_buyers": 25,
-    "buy_sell_ratio": 1.2
+    "buy_sell_ratio": 1.0
   },
   "birdeye_filters": {
     "enabled": true,
     "min_liquidity_usd": 500,
-    "max_progress_percent": 80,
+    "max_progress_percent": 99,
     "require_socials": false,
     "min_token_age_seconds": 1,
     "creator_blacklist": []
@@ -32,9 +32,7 @@
     "errors": true
   },
   "database": {
-    "save_passed_tokens": true,
     "save_logs": true,
-    "max_passed_tokens": 50,
     "max_logs": 500
   },
   "terminal": {

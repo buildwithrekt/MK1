@@ -18,6 +18,7 @@ export class PositionManager extends EventEmitter {
   private positions: Map<string, ManagedPosition> = new Map();
   private entryMarketCaps: Map<string, number> = new Map(); // Track entry MC for logs
   private highestPrices: Map<string, number> = new Map(); // Track ATH for trailing stop
+  private trailingActivated: Set<string> = new Set(); // Track positions where trailing stop is armed
   private closingPositions: Set<string> = new Set(); // Prevent duplicate closes
   private executor: ExecutorService;
   private config: BotConfig;
@@ -47,7 +48,8 @@ export class PositionManager extends EventEmitter {
     entryPrice: number,
     solAmount: number,
     tokenAmount: bigint,
-    marketCapUsd: number = 0
+    marketCapUsd: number = 0,
+    imageUri?: string
   ): Promise<ManagedPosition | null> {
     if (this.positions.has(mint)) {
       logger.warn('Position already exists for this token', { mint });
@@ -92,6 +94,7 @@ export class PositionManager extends EventEmitter {
         amount_sol: solAmount,
         token_amount: Number(tokenAmount),
         dry_run: this.executor.isDryRun(),
+        image_uri: imageUri,
       });
       position.dbId = trade.id;
     } catch (error) {
@@ -211,12 +214,38 @@ export class PositionManager extends EventEmitter {
     ) {
       position.tookInitial = true;
       const sellPercent = this.exitRules.take_profit.sell_percent;
+
+      // Arm trailing stop immediately after TP
+      if (this.exitRules.trailing_stop?.enabled) {
+        this.trailingActivated.add(position.mint);
+        logger.info(`🔒 Trailing stop ARMED after TP for ${position.tokenName}`);
+      }
+
       await this.partialSell(position, sellPercent, 'TP');
       return;
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // PRE-MIGRATION - partial sell when market cap reaches threshold
+    // POST-TP MC TARGET - after TP, sell remaining when MC is in target zone
+    // ═══════════════════════════════════════════════════════════════
+    if (
+      this.exitRules.post_tp_target?.enabled &&
+      position.tookInitial &&
+      !position.tookPreMigration &&
+      marketCapUsd >= this.exitRules.post_tp_target.min_market_cap_usd &&
+      marketCapUsd <= this.exitRules.post_tp_target.max_market_cap_usd
+    ) {
+      position.tookPreMigration = true;
+      const mcDisplay = `$${(marketCapUsd/1000).toFixed(1)}K`;
+      const minMc = `$${(this.exitRules.post_tp_target.min_market_cap_usd/1000).toFixed(0)}K`;
+      const maxMc = `$${(this.exitRules.post_tp_target.max_market_cap_usd/1000).toFixed(0)}K`;
+      logger.info(`🎯 MC Target zone (${minMc}-${maxMc}) reached for ${position.tokenName} | MC: ${mcDisplay} | Selling remaining`);
+      await this.closePosition(position.mint, 'PRE_MIGRATION');
+      return;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // PRE-MIGRATION SAFETY - close if MC exceeds 40K (avoid migration risk)
     // ═══════════════════════════════════════════════════════════════
     if (
       this.exitRules.pre_migration.enabled &&
@@ -231,22 +260,27 @@ export class PositionManager extends EventEmitter {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // TRAILING STOP - sell when price drops X% from highest
+    // TRAILING STOP - arms at activation_percent OR after TP, sells at break-even
     // ═══════════════════════════════════════════════════════════════
     if (this.exitRules.trailing_stop?.enabled) {
-      const { activation_percent, trail_percent } = this.exitRules.trailing_stop;
+      const { activation_percent } = this.exitRules.trailing_stop;
+      const isActivated = this.trailingActivated.has(position.mint);
 
-      // Only activate trailing stop after gaining activation_percent
-      if (pnlPercent >= activation_percent) {
-        const highestPrice = this.highestPrices.get(position.mint) || position.entryPrice;
-        const dropFromHigh = ((highestPrice - position.currentPrice) / highestPrice) * 100;
+      // Arm trailing stop when reaching activation_percent (if not already armed by TP)
+      if (!isActivated && pnlPercent >= activation_percent) {
+        this.trailingActivated.add(position.mint);
+        const highestPrice = this.highestPrices.get(position.mint) || position.currentPrice;
+        logger.info(`🔒 Trailing stop ARMED for ${position.tokenName} | PnL: +${pnlPercent.toFixed(1)}% | ATH: ${highestPrice.toFixed(12)}`);
+      }
 
-        if (dropFromHigh >= trail_percent) {
-          const pnlFromHigh = ((position.currentPrice - position.entryPrice) / position.entryPrice) * 100;
-          logger.info(`📉 Trailing stop triggered for ${position.tokenName} | ATH drop: -${dropFromHigh.toFixed(1)}% | PnL: +${pnlFromHigh.toFixed(1)}%`);
-          await this.closePosition(position.mint, 'TRAILING_STOP');
-          return;
-        }
+      // Once armed, sell if price drops back to entry (break-even)
+      if (this.trailingActivated.has(position.mint) && pnlPercent <= 0) {
+        const highestPnl = this.highestPrices.get(position.mint)
+          ? ((this.highestPrices.get(position.mint)! - position.entryPrice) / position.entryPrice) * 100
+          : activation_percent;
+        logger.info(`📉 Trailing stop triggered for ${position.tokenName} | Was +${highestPnl.toFixed(1)}% → now ${pnlPercent.toFixed(1)}% | Selling at break-even`);
+        await this.closePosition(position.mint, 'TRAILING_STOP');
+        return;
       }
     }
 
@@ -363,6 +397,14 @@ export class PositionManager extends EventEmitter {
           pnlSol,
           pnlPercent
         );
+
+        // Update bot_stats with trade result
+        await this.db.updateBotStatsOnTradeClose(
+          pnlSol,
+          pnlPercent,
+          position.solAmount,
+          position.simulated ?? true
+        );
       } catch (error) {
         logger.error(`Failed to update trade in database: ${(error as Error).message}`);
       }
@@ -395,6 +437,7 @@ export class PositionManager extends EventEmitter {
     // Clean up
     this.entryMarketCaps.delete(mint);
     this.highestPrices.delete(mint);
+    this.trailingActivated.delete(mint);
     this.closingPositions.delete(mint);
 
     this.emit('position_closed', { position, reason, pnlSol, pnlPercent });
