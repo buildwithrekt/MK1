@@ -8,9 +8,24 @@ import { PositionManager } from './services/position.js';
 import { getDatabase } from './services/database.js';
 import { priceService } from './services/price.js';
 import { logger } from './utils/logger.js';
+import { getHealthService } from './services/health.js';
 import { CONFIG_POLL_INTERVAL, PRICE_CHECK_INTERVAL } from './constants.js';
 import { fetchAndValidateToken, fetchTokenLogo } from './services/birdeye.js';
 import type { BotConfig, ExitRules } from './types/index.js';
+
+// Global error handlers for production stability
+process.on('uncaughtException', (error) => {
+  logger.error(`UNCAUGHT EXCEPTION: ${error.message}`);
+  console.error('Uncaught Exception:', error);
+  // Don't exit - try to keep running
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  logger.error(`UNHANDLED REJECTION: ${message}`);
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit - try to keep running
+});
 
 // Token being monitored in memory (NOT saved to DB until it passes filters)
 interface MonitoredToken {
@@ -33,6 +48,11 @@ interface MonitoredToken {
   devSold: boolean;
   // Track if we already tried to enter this token
   entryAttempted: boolean;
+  // ATH tracking for Dip Buy strategy
+  athMarketCapSol: number;
+  athTimestamp: number;
+  // Track which strategy was used (if any)
+  entryStrategy: 'none' | 'fresh' | 'dip_buy';
 }
 
 async function main() {
@@ -49,7 +69,12 @@ async function main() {
 
   // Environment variable overrides JSON config (for production)
   const isDryRun = process.env.DRY_RUN === 'false' ? false : jsonConfig.mode.dry_run;
+  const tradeAmountUsd = process.env.TRADE_AMOUNT_USD
+    ? parseFloat(process.env.TRADE_AMOUNT_USD)
+    : jsonConfig.trading.amount_per_trade_usd;
+
   console.log(`Mode: ${isDryRun ? '🧪 DRY RUN (Paper Trading)' : '🔴 LIVE TRADING'}`);
+  console.log(`Trade Amount: $${tradeAmountUsd} per position`);
   console.log('');
 
   // Validate config
@@ -94,12 +119,12 @@ async function main() {
   }
   console.log('');
 
-  // Bot config
+  // Bot config (use env override for trade amount)
   const botConfig: BotConfig = {
     id: 'local',
     is_running: jsonConfig.mode.is_running,
     dry_run: isDryRun,
-    amount_per_trade_usd: jsonConfig.trading.amount_per_trade_usd,
+    amount_per_trade_usd: tradeAmountUsd,
     max_positions: jsonConfig.trading.max_positions,
     tp_percent: jsonConfig.exit_rules.take_profit.trigger_percent,
     sl_percent: jsonConfig.exit_rules.stop_loss.percent,
@@ -120,9 +145,41 @@ async function main() {
     envConfig.walletPublicKey,
     isDryRun,
     jsonConfig.trading.slippage_percent,
-    jsonConfig.trading.priority_fee_sol
+    jsonConfig.trading.priority_fee_sol,
+    jsonConfig.trading.default_pool || 'pump',
+    jsonConfig.trading.use_jito || false
   );
   const positionManager = new PositionManager(executor, botConfig, exitRules);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // HEALTH MONITORING - Track bot health and alert on issues
+  // ═══════════════════════════════════════════════════════════════════════════
+  const healthService = getHealthService({
+    checkIntervalMs: 30000,
+    dataFeedTimeoutMs: 60000,
+    rpcTimeoutMs: 60000,
+    positionUpdateTimeoutMs: 120000,
+  });
+
+  // Wire up health monitoring to services
+  pumpPortal.on('connected', () => healthService.recordDataFeedActivity());
+  pumpPortal.on('new_token', () => healthService.recordDataFeedActivity());
+  pumpPortal.on('trade', () => healthService.recordDataFeedActivity());
+  pumpPortal.on('error', (error) => healthService.recordError(`PumpPortal: ${error.message}`));
+
+  // Track position changes for health monitoring
+  positionManager.on('position_opened', () => {
+    healthService.recordPositionUpdate();
+  });
+  positionManager.on('position_closed', () => {
+    // Check if no more open positions
+    if (positionManager.getOpenPositions().length === 0) {
+      healthService.clearPositions();
+    }
+  });
+
+  // Start health monitoring
+  healthService.start();
 
   // ═══════════════════════════════════════════════════════════════════════════
   // MONITORING: Track tokens in memory, only save to DB when they pass filters
@@ -134,13 +191,24 @@ async function main() {
   const MONITORING_DURATION_MS = scanConfig.monitoring.monitoring_duration_seconds * 1000;
   const MAX_MONITORED = scanConfig.monitoring.max_tokens_monitored;
 
-  // Entry filters (target zone)
+  // Entry filters (target zone) - Strategy A: Fresh Entry
   const TARGET_MIN_MC = scanConfig.entry_filters.min_market_cap_usd;
   const TARGET_MAX_MC = scanConfig.entry_filters.max_market_cap_usd;
   const MIN_VOLUME = scanConfig.entry_filters.min_buy_volume_usd;
   const MIN_BUYERS = scanConfig.entry_filters.min_unique_buyers;
   const BUY_SELL_RATIO = scanConfig.entry_filters.buy_sell_ratio;
   const DEV_MUST_SELL = scanConfig.entry_filters.dev_must_sell;
+
+  // Dip Buy Strategy - Strategy B: Buy the dip on proven tokens
+  const DIP_BUY_ENABLED = scanConfig.dip_buy_strategy.enabled;
+  const DIP_MIN_ATH_MC = scanConfig.dip_buy_strategy.min_ath_market_cap_usd;
+  const DIP_MIN_PERCENT = scanConfig.dip_buy_strategy.min_dip_percent;
+  const DIP_MAX_PERCENT = scanConfig.dip_buy_strategy.max_dip_percent;
+  const DIP_MIN_CURRENT_MC = scanConfig.dip_buy_strategy.min_current_market_cap_usd;
+  const DIP_MAX_CURRENT_MC = scanConfig.dip_buy_strategy.max_current_market_cap_usd;
+  const DIP_MAX_TIME_SINCE_ATH = scanConfig.dip_buy_strategy.max_time_since_ath_seconds * 1000;
+  const DIP_MIN_VOLUME = scanConfig.dip_buy_strategy.min_volume_usd;
+  const DIP_MIN_BUYERS = scanConfig.dip_buy_strategy.min_unique_buyers;
 
   // Terminal settings
   const SHOW_NEW_TOKENS = scanConfig.terminal.show_new_tokens;
@@ -192,12 +260,73 @@ async function main() {
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // CHECK IF TOKEN PASSES DIP BUY FILTERS (Strategy B)
+  // ═══════════════════════════════════════════════════════════════════════════
+  const checkDipBuyFilters = (token: MonitoredToken): { passed: boolean; reason?: string } => {
+    if (!DIP_BUY_ENABLED) {
+      return { passed: false, reason: 'Dip buy disabled' };
+    }
+
+    const now = Date.now();
+    const athUsd = priceService.solToUsd(token.athMarketCapSol);
+    const currentMcUsd = priceService.solToUsd(token.marketCapSol);
+    const volumeUsd = priceService.solToUsd(token.totalBuyVolume);
+    const uniqueBuyers = token.uniqueBuyers.size;
+    const timeSinceAth = now - token.athTimestamp;
+
+    // Check if ATH was high enough (token proved it can pump)
+    if (athUsd < DIP_MIN_ATH_MC) {
+      return { passed: false, reason: `ATH $${(athUsd/1000).toFixed(1)}K < $${DIP_MIN_ATH_MC/1000}K` };
+    }
+
+    // Check current MC is in dip buy zone
+    if (currentMcUsd < DIP_MIN_CURRENT_MC) {
+      return { passed: false, reason: `MC $${(currentMcUsd/1000).toFixed(1)}K < $${DIP_MIN_CURRENT_MC/1000}K` };
+    }
+    if (currentMcUsd > DIP_MAX_CURRENT_MC) {
+      return { passed: false, reason: `MC $${(currentMcUsd/1000).toFixed(1)}K > $${DIP_MAX_CURRENT_MC/1000}K` };
+    }
+
+    // Check dip percentage from ATH
+    const dipPercent = ((athUsd - currentMcUsd) / athUsd) * 100;
+    if (dipPercent < DIP_MIN_PERCENT) {
+      return { passed: false, reason: `Dip ${dipPercent.toFixed(1)}% < ${DIP_MIN_PERCENT}%` };
+    }
+    if (dipPercent > DIP_MAX_PERCENT) {
+      return { passed: false, reason: `Dip ${dipPercent.toFixed(1)}% > ${DIP_MAX_PERCENT}% (too dead)` };
+    }
+
+    // Check time since ATH (don't buy old dips)
+    if (timeSinceAth > DIP_MAX_TIME_SINCE_ATH) {
+      return { passed: false, reason: `ATH ${Math.round(timeSinceAth/1000)}s ago > ${DIP_MAX_TIME_SINCE_ATH/1000}s` };
+    }
+
+    // Check volume
+    if (volumeUsd < DIP_MIN_VOLUME) {
+      return { passed: false, reason: `Vol $${volumeUsd.toFixed(0)} < $${DIP_MIN_VOLUME}` };
+    }
+
+    // Check buyers
+    if (uniqueBuyers < DIP_MIN_BUYERS) {
+      return { passed: false, reason: `Buyers ${uniqueBuyers} < ${DIP_MIN_BUYERS}` };
+    }
+
+    // Check dev sold (always required for safety)
+    if (!token.devSold) {
+      return { passed: false, reason: 'Dev not sold' };
+    }
+
+    return { passed: true };
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // TRY TO ENTER A POSITION
   // ═══════════════════════════════════════════════════════════════════════════
-  const tryEnterPosition = async (token: MonitoredToken) => {
+  const tryEnterPosition = async (token: MonitoredToken, strategy: 'fresh' | 'dip_buy') => {
     // Already attempted entry on this token
     if (token.entryAttempted) return;
     token.entryAttempted = true;
+    token.entryStrategy = strategy;
 
     // Check if bot is running
     if (!botConfig.is_running) {
@@ -325,6 +454,10 @@ async function main() {
       marketCapSol: data.marketCapSol,
       devSold: false,
       entryAttempted: false,
+      // ATH tracking for dip buy strategy
+      athMarketCapSol: data.marketCapSol,
+      athTimestamp: Date.now(),
+      entryStrategy: 'none',
     };
 
     monitoringTokens.set(data.mint, token);
@@ -350,6 +483,7 @@ async function main() {
       const newPrice = PumpPortalService.calculatePrice(data.vSolInBondingCurve, data.vTokensInBondingCurve);
       const marketCapUsd = priceService.solToUsd(data.marketCapSol);
       positionManager.updatePrice(data.mint, newPrice, marketCapUsd);
+      healthService.recordPositionUpdate();
     }
 
     // Update monitored token
@@ -362,6 +496,12 @@ async function main() {
     token.lastUpdate = Date.now();
     token.lastPrice = PumpPortalService.calculatePrice(data.vSolInBondingCurve, data.vTokensInBondingCurve);
     token.marketCapSol = data.marketCapSol;
+
+    // Update ATH if new high
+    if (data.marketCapSol > token.athMarketCapSol) {
+      token.athMarketCapSol = data.marketCapSol;
+      token.athTimestamp = Date.now();
+    }
 
     if (data.txType === 'buy') {
       token.buys.push({ solAmount, user: data.traderPublicKey });
@@ -377,17 +517,31 @@ async function main() {
       }
     }
 
-    // Check if token now passes all entry filters
+    // Check if token now passes entry filters (either strategy)
     if (!token.entryAttempted) {
-      const { passed } = checkEntryFilters(token);
-      if (passed) {
-        // Log zone entry if enabled (terminal or logging config)
+      // Strategy A: Fresh Entry (first pump into zone)
+      const freshEntry = checkEntryFilters(token);
+      if (freshEntry.passed) {
+        const marketCapUsd = priceService.solToUsd(token.marketCapSol);
+        const buyVolumeUsd = priceService.solToUsd(token.totalBuyVolume);
         if (SHOW_ZONE_ENTRIES || scanConfig.logging.token_entered_zone) {
-          const marketCapUsd = priceService.solToUsd(token.marketCapSol);
-          const buyVolumeUsd = priceService.solToUsd(token.totalBuyVolume);
-          console.log(`🎯 ZONE ENTRY: ${token.symbol} | MC: ${priceService.formatUsd(marketCapUsd)} | Vol: ${priceService.formatUsd(buyVolumeUsd)} | Buyers: ${token.uniqueBuyers.size}`);
+          console.log(`🎯 FRESH ENTRY: ${token.symbol} | MC: ${priceService.formatUsd(marketCapUsd)} | Vol: ${priceService.formatUsd(buyVolumeUsd)} | Buyers: ${token.uniqueBuyers.size}`);
         }
-        tryEnterPosition(token);
+        tryEnterPosition(token, 'fresh');
+        return;
+      }
+
+      // Strategy B: Dip Buy (token pumped then dipped)
+      const dipBuyEntry = checkDipBuyFilters(token);
+      if (dipBuyEntry.passed) {
+        const athUsd = priceService.solToUsd(token.athMarketCapSol);
+        const currentMcUsd = priceService.solToUsd(token.marketCapSol);
+        const dipPercent = ((athUsd - currentMcUsd) / athUsd) * 100;
+        if (SHOW_ZONE_ENTRIES || scanConfig.logging.token_entered_zone) {
+          console.log(`📉 DIP BUY: ${token.symbol} | ATH: ${priceService.formatUsd(athUsd)} → MC: ${priceService.formatUsd(currentMcUsd)} | Dip: -${dipPercent.toFixed(1)}%`);
+        }
+        tryEnterPosition(token, 'dip_buy');
+        return;
       }
     }
   });
@@ -572,9 +726,11 @@ async function main() {
 
         if (tokensToSync.length > 0) {
           await db!.bulkUpsertMonitoredTokens(tokensToSync);
+          healthService.recordDatabaseActivity();
         }
       } catch (err) {
         console.error('❌ Failed to sync monitored tokens:', (err as Error).message);
+        healthService.recordError('Database sync failed');
       }
     }, 10000); // Every 10 seconds
   }
@@ -584,6 +740,18 @@ async function main() {
     await pumpPortal.connect();
     pumpPortal.subscribeNewTokens();
 
+    // Restore any open positions from database (survives restarts)
+    const restoredCount = await positionManager.loadOpenPositions();
+    if (restoredCount > 0) {
+      logger.info(`Restored ${restoredCount} position(s) - will continue monitoring`);
+      // Subscribe to price updates for restored positions
+      const restoredMints = positionManager.getOpenPositions().map(p => p.mint);
+      if (restoredMints.length > 0) {
+        pumpPortal.subscribeTokenTrades(restoredMints);
+        logger.info(`Subscribed to trades for ${restoredMints.length} restored position(s)`);
+      }
+    }
+
     logger.info('Bot started');
     positionManager.startMonitoring(PRICE_CHECK_INTERVAL);
 
@@ -591,7 +759,7 @@ async function main() {
     console.log('┌─────────────────────────────────────────────────────────────┐');
     console.log('│ Bot Configuration:                                          │');
     console.log(`│   Mode: ${isDryRun ? 'PAPER' : 'LIVE'}                                                  │`);
-    console.log(`│   Trade: $${jsonConfig.trading.amount_per_trade_usd} per position (max ${jsonConfig.trading.max_positions})                   │`);
+    console.log(`│   Trade: $${tradeAmountUsd} per position (max ${jsonConfig.trading.max_positions})                   │`);
     console.log('├─────────────────────────────────────────────────────────────┤');
     console.log('│ Monitoring Strategy:                                        │');
     console.log(`│   Initial scan: MC > $${(MIN_INITIAL_MC/1000).toFixed(0)}K                                   │`);
@@ -614,6 +782,7 @@ async function main() {
   const shutdown = () => {
     console.log('');
     logger.info('Shutting down...');
+    healthService.stop();
     positionManager.stopMonitoring();
     priceService.stop();
     pumpPortal.disconnect();

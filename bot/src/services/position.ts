@@ -41,6 +41,60 @@ export class PositionManager extends EventEmitter {
     this.exitRules = exitRules;
   }
 
+  // Load open positions from database on startup
+  async loadOpenPositions(): Promise<number> {
+    try {
+      const isDryRun = this.executor.isDryRun();
+      const openTrades = await this.db.getOpenTrades(isDryRun);
+
+      if (openTrades.length === 0) {
+        logger.info('No open positions to restore');
+        return 0;
+      }
+
+      for (const trade of openTrades) {
+        // Cast to access database fields not in type definition
+        const tradeData = trade as unknown as Record<string, unknown>;
+
+        // Recreate position from database
+        const position: ManagedPosition = {
+          id: `pos_restored_${trade.id}`,
+          dbId: trade.id,
+          mint: trade.token_address,
+          tokenName: trade.token_name || 'Unknown',
+          bondingCurve: (tradeData.bonding_curve as string) || '',
+          entryPrice: trade.entry_price,
+          currentPrice: trade.entry_price, // Will be updated by price feed
+          entryTime: new Date(trade.created_at),
+          tokenAmount: BigInt(Math.floor((tradeData.token_amount as number) || 0)),
+          initialTokenAmount: BigInt(Math.floor((tradeData.token_amount as number) || 0)),
+          solAmount: trade.amount_sol,
+          status: 'OPEN',
+          pnlPercent: 0,
+          priceHistory: [{ price: trade.entry_price, timestamp: Date.now() }],
+          simulated: isDryRun,
+          tookInitial: false, // Reset - will re-trigger if conditions met
+          tookPreMigration: false,
+          migrated: false,
+          marketCapUsd: 0,
+        };
+
+        this.positions.set(trade.token_address, position);
+        this.highestPrices.set(trade.token_address, trade.entry_price);
+
+        // If position is already profitable, arm trailing stop
+        // (We don't know the ATH, so we start fresh from current price)
+        logger.info(`🔄 Restored position: ${position.tokenName} | Entry: ${trade.entry_price.toFixed(12)} | Tokens: ${position.tokenAmount}`);
+      }
+
+      logger.info(`✅ Restored ${openTrades.length} open position(s) from database`);
+      return openTrades.length;
+    } catch (error) {
+      logger.error(`Failed to load open positions: ${(error as Error).message}`);
+      return 0;
+    }
+  }
+
   async openPosition(
     mint: string,
     tokenName: string,
@@ -260,27 +314,39 @@ export class PositionManager extends EventEmitter {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // TRAILING STOP - arms at activation_percent OR after TP, sells at break-even
+    // TRAILING STOP - arms at activation_percent OR after TP, sells when dropping trail_percent from ATH
     // ═══════════════════════════════════════════════════════════════
     if (this.exitRules.trailing_stop?.enabled) {
-      const { activation_percent } = this.exitRules.trailing_stop;
+      const { activation_percent, trail_percent } = this.exitRules.trailing_stop;
       const isActivated = this.trailingActivated.has(position.mint);
+
+      // Calculate highest PnL reached
+      const highestPrice = this.highestPrices.get(position.mint) || position.entryPrice;
+      const highestPnl = ((highestPrice - position.entryPrice) / position.entryPrice) * 100;
 
       // Arm trailing stop when reaching activation_percent (if not already armed by TP)
       if (!isActivated && pnlPercent >= activation_percent) {
         this.trailingActivated.add(position.mint);
-        const highestPrice = this.highestPrices.get(position.mint) || position.currentPrice;
-        logger.info(`🔒 Trailing stop ARMED for ${position.tokenName} | PnL: +${pnlPercent.toFixed(1)}% | ATH: ${highestPrice.toFixed(12)}`);
+        logger.info(`🔒 Trailing stop ARMED for ${position.tokenName} | PnL: +${pnlPercent.toFixed(1)}% | Trail: ${trail_percent}%`);
       }
 
-      // Once armed, sell if price drops back to entry (break-even)
-      if (this.trailingActivated.has(position.mint) && pnlPercent <= 0) {
-        const highestPnl = this.highestPrices.get(position.mint)
-          ? ((this.highestPrices.get(position.mint)! - position.entryPrice) / position.entryPrice) * 100
-          : activation_percent;
-        logger.info(`📉 Trailing stop triggered for ${position.tokenName} | Was +${highestPnl.toFixed(1)}% → now ${pnlPercent.toFixed(1)}% | Selling at break-even`);
-        await this.closePosition(position.mint, 'TRAILING_STOP');
-        return;
+      // Once armed, check if we dropped trail_percent from the highest PnL
+      if (this.trailingActivated.has(position.mint)) {
+        const trailTriggerPnl = highestPnl - trail_percent;
+
+        // Only trigger if we had significant gains and dropped by trail_percent
+        if (highestPnl >= activation_percent && pnlPercent <= trailTriggerPnl) {
+          logger.info(`📉 Trailing stop triggered for ${position.tokenName} | ATH: +${highestPnl.toFixed(1)}% → now +${pnlPercent.toFixed(1)}% (dropped ${trail_percent}%)`);
+          await this.closePosition(position.mint, 'TRAILING_STOP');
+          return;
+        }
+
+        // Also close if we drop back to break-even (safety net)
+        if (pnlPercent <= 0) {
+          logger.info(`📉 Trailing stop (break-even) for ${position.tokenName} | ATH: +${highestPnl.toFixed(1)}% → now ${pnlPercent.toFixed(1)}%`);
+          await this.closePosition(position.mint, 'TRAILING_STOP');
+          return;
+        }
       }
     }
 
@@ -327,7 +393,9 @@ export class PositionManager extends EventEmitter {
       return;
     }
 
-    const result = await this.executor.sell(position.mint, tokensToSell, undefined, position.tokenName);
+    // Use pool: 'auto' for migrated tokens to find liquidity on Raydium
+    const sellOptions = position.migrated ? { pool: 'auto' as const } : undefined;
+    const result = await this.executor.sell(position.mint, tokensToSell, sellOptions, position.tokenName);
 
     if (!result.success) {
       logger.error(`❌ Partial sell failed: ${position.tokenName}`, { error: result.error });
@@ -375,7 +443,9 @@ export class PositionManager extends EventEmitter {
 
     // Sell remaining tokens
     if (position.tokenAmount > 0n) {
-      const result = await this.executor.sell(position.mint, position.tokenAmount, undefined, position.tokenName);
+      // Use pool: 'auto' for migrated tokens to find liquidity on Raydium
+      const sellOptions = position.migrated ? { pool: 'auto' as const } : undefined;
+      const result = await this.executor.sell(position.mint, position.tokenAmount, sellOptions, position.tokenName);
 
       if (!result.success) {
         logger.error(`❌ Failed to close: ${position.tokenName}`, { error: result.error });

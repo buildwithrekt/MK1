@@ -70,8 +70,8 @@ export function PaperTradingBubble() {
 
   // Default stats if none exist yet
   const displayStats = stats || {
-    current_balance: 0.5,
-    initial_balance: 0.5,
+    current_balance: 10,
+    initial_balance: 10,
     total_pnl_sol: 0,
     total_pnl_percent: 0,
     win_rate: 0,

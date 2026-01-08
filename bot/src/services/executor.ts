@@ -6,6 +6,20 @@ import type { TransactionResult } from '../types/index.js';
 // Lightning API - simpler, no local signing needed (1% fee)
 const PUMPPORTAL_API_URL = 'https://pumpportal.fun/api/trade';
 
+// Retry configuration
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY_MS = 1000;
+
+// Transaction confirmation config
+const TX_CONFIRMATION_TIMEOUT_MS = 30000;
+const TX_CONFIRMATION_POLL_INTERVAL_MS = 2000;
+
+// Minimum balance required (keep some SOL for fees)
+const MIN_BALANCE_SOL = 0.01;
+
+// Supported trading pools
+export type TradingPool = 'pump' | 'raydium' | 'pump-amm' | 'launchlab' | 'raydium-cpmm' | 'bonk' | 'auto';
+
 export interface TradeParams {
   action: 'buy' | 'sell';
   mint: string;
@@ -13,7 +27,15 @@ export interface TradeParams {
   denominatedInSol: string;
   slippage: number;
   priorityFee: number;
-  pool?: 'pump' | 'raydium' | 'pump-amm' | 'auto';
+  pool?: TradingPool;
+  jitoOnly?: string;  // "true" = send exclusively through Jito relay (MEV protection)
+}
+
+// Options for individual trades
+export interface TradeOptions {
+  slippage?: number;
+  pool?: TradingPool;
+  jitoOnly?: boolean;
 }
 
 interface PumpPortalResponse {
@@ -29,6 +51,11 @@ export class ExecutorService {
   private dryRun: boolean;
   private slippage: number;
   private priorityFee: number;
+  private defaultPool: TradingPool;
+  private useJito: boolean;
+  private cachedBalance: number = 0;
+  private lastBalanceCheck: number = 0;
+  private balanceCacheDuration: number = 10000; // 10 seconds
 
   constructor(
     rpcUrl: string,
@@ -36,7 +63,9 @@ export class ExecutorService {
     walletPublicKey: string,
     dryRun: boolean,
     slippage: number = 15,
-    priorityFee: number = 0.0005
+    priorityFee: number = 0.0005,
+    defaultPool: TradingPool = 'pump',
+    useJito: boolean = false
   ) {
     this.rpc = new Connection(rpcUrl, 'confirmed');
     this.publicKey = walletPublicKey;
@@ -44,13 +73,15 @@ export class ExecutorService {
     this.dryRun = dryRun;
     this.slippage = slippage;
     this.priorityFee = priorityFee;
+    this.defaultPool = defaultPool;
+    this.useJito = useJito;
   }
 
   // BUY tokens using PumpPortal Lightning API
   async buy(
     mint: string,
     solAmount: number,
-    slippage?: number,
+    options?: TradeOptions,
     tokenName?: string
   ): Promise<TransactionResult> {
     const displayName = tokenName || 'Unknown';
@@ -63,18 +94,35 @@ export class ExecutorService {
       return { success: false, error: 'API key not configured' };
     }
 
+    // Validate balance before trade
+    const balanceCheck = await this.validateBalance(solAmount);
+    if (!balanceCheck.valid) {
+      logger.error(`Buy failed: ${balanceCheck.error}`, { mint, solAmount });
+      return { success: false, error: balanceCheck.error };
+    }
+
     try {
       const params: TradeParams = {
         action: 'buy',
         mint,
         amount: solAmount,
         denominatedInSol: 'true',
-        slippage: slippage ?? this.slippage,
+        slippage: options?.slippage ?? this.slippage,
         priorityFee: this.priorityFee,
-        pool: 'pump',
+        pool: options?.pool ?? this.defaultPool,
       };
 
-      const result = await this.executeTransaction(params);
+      // Add Jito if enabled
+      if (options?.jitoOnly ?? this.useJito) {
+        params.jitoOnly = 'true';
+      }
+
+      const result = await this.executeTransactionWithRetry(params);
+
+      // Invalidate balance cache after successful trade
+      if (result.success) {
+        this.lastBalanceCheck = 0;
+      }
 
       return result;
     } catch (error) {
@@ -88,7 +136,7 @@ export class ExecutorService {
   async sell(
     mint: string,
     tokenAmount: bigint | string,
-    slippage?: number,
+    options?: TradeOptions,
     tokenName?: string
   ): Promise<TransactionResult> {
     const displayName = tokenName || 'Unknown';
@@ -112,12 +160,22 @@ export class ExecutorService {
         mint,
         amount,
         denominatedInSol: 'false',
-        slippage: slippage ?? this.slippage,
+        slippage: options?.slippage ?? this.slippage,
         priorityFee: this.priorityFee,
-        pool: 'pump',
+        pool: options?.pool ?? this.defaultPool,
       };
 
-      const result = await this.executeTransaction(params);
+      // Add Jito if enabled
+      if (options?.jitoOnly ?? this.useJito) {
+        params.jitoOnly = 'true';
+      }
+
+      const result = await this.executeTransactionWithRetry(params);
+
+      // Invalidate balance cache after successful trade
+      if (result.success) {
+        this.lastBalanceCheck = 0;
+      }
 
       return result;
     } catch (error) {
@@ -125,6 +183,134 @@ export class ExecutorService {
       logger.error('Sell failed', { error: errorMsg, mint });
       return { success: false, error: errorMsg };
     }
+  }
+
+  // Validate wallet balance before trade
+  private async validateBalance(requiredSol: number): Promise<{ valid: boolean; error?: string }> {
+    try {
+      const balance = await this.getWalletBalanceCached();
+      const totalRequired = requiredSol + this.priorityFee + MIN_BALANCE_SOL;
+
+      if (balance < totalRequired) {
+        return {
+          valid: false,
+          error: `Insufficient balance: ${balance.toFixed(4)} SOL < ${totalRequired.toFixed(4)} SOL required`,
+        };
+      }
+
+      return { valid: true };
+    } catch (error) {
+      return {
+        valid: false,
+        error: `Failed to check balance: ${(error as Error).message}`,
+      };
+    }
+  }
+
+  // Get wallet balance with caching
+  private async getWalletBalanceCached(): Promise<number> {
+    const now = Date.now();
+    if (now - this.lastBalanceCheck < this.balanceCacheDuration && this.cachedBalance > 0) {
+      return this.cachedBalance;
+    }
+
+    this.cachedBalance = await this.getWalletBalance();
+    this.lastBalanceCheck = now;
+    return this.cachedBalance;
+  }
+
+  // Execute transaction with retry logic
+  private async executeTransactionWithRetry(params: TradeParams): Promise<TransactionResult> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        logger.info(`Transaction attempt ${attempt}/${MAX_RETRIES} for ${params.action} ${params.mint.slice(0, 8)}...`);
+
+        const result = await this.executeTransaction(params);
+
+        // Confirm transaction on-chain
+        if (result.success && result.signature) {
+          const confirmed = await this.confirmTransaction(result.signature);
+          if (!confirmed) {
+            throw new Error(`Transaction not confirmed on-chain: ${result.signature}`);
+          }
+          logger.info(`Transaction confirmed on-chain: ${result.signature.slice(0, 16)}...`);
+        }
+
+        return result;
+      } catch (error) {
+        lastError = error as Error;
+        logger.warn(`Transaction attempt ${attempt} failed: ${lastError.message}`);
+
+        // Don't retry on certain errors
+        if (this.isNonRetryableError(lastError.message)) {
+          logger.error(`Non-retryable error, stopping: ${lastError.message}`);
+          break;
+        }
+
+        // Wait before retry with exponential backoff
+        if (attempt < MAX_RETRIES) {
+          const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt - 1);
+          logger.info(`Waiting ${delay}ms before retry...`);
+          await this.sleep(delay);
+        }
+      }
+    }
+
+    return {
+      success: false,
+      error: lastError?.message || 'Transaction failed after all retries',
+    };
+  }
+
+  // Check if error should not be retried
+  private isNonRetryableError(errorMessage: string): boolean {
+    const nonRetryablePatterns = [
+      'insufficient',
+      'Invalid',
+      'not configured',
+      'slippage',
+      'already processed',
+    ];
+    return nonRetryablePatterns.some(pattern =>
+      errorMessage.toLowerCase().includes(pattern.toLowerCase())
+    );
+  }
+
+  // Confirm transaction on-chain
+  private async confirmTransaction(signature: string): Promise<boolean> {
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < TX_CONFIRMATION_TIMEOUT_MS) {
+      try {
+        const status = await this.rpc.getSignatureStatus(signature);
+
+        if (status?.value?.confirmationStatus === 'confirmed' ||
+            status?.value?.confirmationStatus === 'finalized') {
+          // Check for errors
+          if (status.value.err) {
+            logger.error(`Transaction failed on-chain: ${JSON.stringify(status.value.err)}`);
+            return false;
+          }
+          return true;
+        }
+
+        // Transaction not yet confirmed, wait and retry
+        await this.sleep(TX_CONFIRMATION_POLL_INTERVAL_MS);
+      } catch (error) {
+        logger.warn(`Error checking transaction status: ${(error as Error).message}`);
+        await this.sleep(TX_CONFIRMATION_POLL_INTERVAL_MS);
+      }
+    }
+
+    logger.error(`Transaction confirmation timeout: ${signature}`);
+    return false;
+  }
+
+  // Sleep utility
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   // Execute transaction via PumpPortal Lightning API
@@ -192,7 +378,8 @@ export class ExecutorService {
       const balance = await this.rpc.getBalance(pubkey);
       return balance / LAMPORTS_PER_SOL;
     } catch (error) {
-      return 0;
+      logger.error(`Failed to get wallet balance: ${(error as Error).message}`);
+      throw error;
     }
   }
 

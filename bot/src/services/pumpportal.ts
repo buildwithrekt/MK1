@@ -51,7 +51,7 @@ export interface PumpPortalEvents {
 
 export interface PumpPortalConfig {
   reconnectDelayMs?: number;
-  maxReconnectAttempts?: number;
+  maxReconnectAttempts?: number; // Set to 0 for infinite reconnection
 }
 
 export class PumpPortalService extends EventEmitter {
@@ -68,7 +68,8 @@ export class PumpPortalService extends EventEmitter {
     super();
     this.wsUrl = wsUrl;
     this.reconnectDelay = config?.reconnectDelayMs ?? 1000;
-    this.maxReconnectAttempts = config?.maxReconnectAttempts ?? 10;
+    // 0 = infinite reconnection attempts (default for production stability)
+    this.maxReconnectAttempts = config?.maxReconnectAttempts ?? 0;
   }
 
   async connect(): Promise<void> {
@@ -230,31 +231,68 @@ export class PumpPortalService extends EventEmitter {
   }
 
   private attemptReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      logger.error('Max reconnection attempts reached');
+    // Check max attempts (0 = infinite)
+    if (this.maxReconnectAttempts > 0 && this.reconnectAttempts >= this.maxReconnectAttempts) {
+      logger.error('Max reconnection attempts reached - Data feed connection lost permanently');
+      this.emit('error', new Error('Max reconnection attempts reached'));
       return;
     }
 
     this.reconnectAttempts++;
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
 
-    logger.info(`Reconnecting in ${delay}ms (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+    // Cap delay at 60 seconds to avoid excessive wait times
+    const maxDelay = 60000;
+    const delay = Math.min(
+      this.reconnectDelay * Math.pow(2, Math.min(this.reconnectAttempts - 1, 6)),
+      maxDelay
+    );
+
+    // Alert if disconnected for too long (more than 5 attempts = ~1 minute)
+    if (this.reconnectAttempts === 5) {
+      logger.error('⚠️ Data feed disconnected for extended period - attempting recovery');
+    }
+
+    // Periodic alert every 10 attempts
+    if (this.reconnectAttempts % 10 === 0) {
+      logger.error(`⚠️ Data feed still disconnected after ${this.reconnectAttempts} attempts`);
+    }
+
+    const attemptsDisplay = this.maxReconnectAttempts > 0
+      ? `${this.reconnectAttempts}/${this.maxReconnectAttempts}`
+      : `${this.reconnectAttempts}/∞`;
+
+    logger.info(`Reconnecting data feed in ${delay}ms (attempt ${attemptsDisplay})`);
 
     setTimeout(async () => {
       try {
         await this.connect();
-        // Resubscribe to everything
-        this.subscribeNewTokens();
-        if (this.subscribedTokens.size > 0) {
-          this.subscribeTokenTrades(Array.from(this.subscribedTokens));
-        }
-        if (this.subscribedAccounts.size > 0) {
-          this.subscribeAccountTrades(Array.from(this.subscribedAccounts));
-        }
+        // Resubscribe to everything after successful reconnection
+        this.resubscribeAll();
       } catch (error) {
-        logger.error('Reconnection failed', { error: (error as Error).message });
+        logger.error(`Data feed reconnection failed: ${(error as Error).message}`);
       }
     }, delay);
+  }
+
+  // Resubscribe to all previously subscribed topics
+  private resubscribeAll(): void {
+    logger.info('Resubscribing to all topics after reconnection...');
+    this.subscribeNewTokens();
+
+    if (this.subscribedTokens.size > 0) {
+      // Clear and resubscribe to avoid duplicate subscription checks
+      const tokens = Array.from(this.subscribedTokens);
+      this.subscribedTokens.clear();
+      this.subscribeTokenTrades(tokens);
+      logger.info(`Resubscribed to ${tokens.length} token trades`);
+    }
+
+    if (this.subscribedAccounts.size > 0) {
+      const accounts = Array.from(this.subscribedAccounts);
+      this.subscribedAccounts.clear();
+      this.subscribeAccountTrades(accounts);
+      logger.info(`Resubscribed to ${accounts.length} account trades`);
+    }
   }
 
   disconnect(): void {

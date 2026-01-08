@@ -20,6 +20,17 @@ export interface ScanConfig {
     min_unique_buyers: number;
     buy_sell_ratio: number;
   };
+  dip_buy_strategy: {
+    enabled: boolean;
+    min_ath_market_cap_usd: number;
+    min_dip_percent: number;
+    max_dip_percent: number;
+    min_current_market_cap_usd: number;
+    max_current_market_cap_usd: number;
+    max_time_since_ath_seconds: number;
+    min_volume_usd: number;
+    min_unique_buyers: number;
+  };
   birdeye_filters: {
     enabled: boolean;
     min_liquidity_usd: number;
@@ -77,6 +88,17 @@ export function loadScanConfig(forceReload = false): ScanConfig {
         min_buy_volume_usd: 1000,
         min_unique_buyers: 15,
         buy_sell_ratio: 1.2,
+      },
+      dip_buy_strategy: {
+        enabled: true,
+        min_ath_market_cap_usd: 20000,
+        min_dip_percent: 25,
+        max_dip_percent: 50,
+        min_current_market_cap_usd: 12000,
+        max_current_market_cap_usd: 25000,
+        max_time_since_ath_seconds: 180,
+        min_volume_usd: 1500,
+        min_unique_buyers: 20,
       },
       birdeye_filters: {
         enabled: true,

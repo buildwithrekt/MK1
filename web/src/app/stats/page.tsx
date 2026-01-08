@@ -27,6 +27,7 @@ interface TradeStats {
   totalPnlPercent: number;
   totalPnlSol: number;
   currentBalance: number;
+  initialBalance: number;
   winRate: number;
   totalTrades: number;
   winningTrades: number;
@@ -42,7 +43,8 @@ export default function StatsPage() {
   const [tradeStats, setTradeStats] = useState<TradeStats>({
     totalPnlPercent: 0,
     totalPnlSol: 0,
-    currentBalance: 0.5,
+    currentBalance: 10,
+    initialBalance: 10,
     winRate: 0,
     totalTrades: 0,
     winningTrades: 0,
@@ -82,6 +84,7 @@ export default function StatsPage() {
             totalPnlPercent: botStats.total_pnl_percent,
             totalPnlSol: botStats.total_pnl_sol,
             currentBalance: botStats.current_balance,
+            initialBalance: botStats.initial_balance || 10,
             winRate: botStats.win_rate,
             totalTrades: botStats.total_trades,
             winningTrades: botStats.winning_trades,
@@ -174,7 +177,7 @@ export default function StatsPage() {
       (a, b) => new Date(a.exit_time!).getTime() - new Date(b.exit_time!).getTime()
     );
 
-    let cumulative = 0.5; // Starting balance
+    let cumulative = tradeStats.initialBalance; // Starting balance from config
     return sorted.map((trade, idx) => {
       cumulative += trade.pnl_sol || 0;
       return {
@@ -184,7 +187,7 @@ export default function StatsPage() {
         token: trade.token_name || trade.token_address.slice(0, 6),
       };
     });
-  }, [closedTrades]);
+  }, [closedTrades, tradeStats.initialBalance]);
 
   // PNL by exit reason
   const exitReasonStats = useMemo(() => {

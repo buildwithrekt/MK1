@@ -67,7 +67,9 @@ export function Navbar() {
 
         {/* Nav */}
         <div className="flex items-center justify-between mt-3">
-          <nav className="flex gap-4 text-sm">
+          <nav className="flex items-between justify-between w-full gap-4 text-sm">
+            <div className="space-x-4">
+
             {NAV_ITEMS.map((item) => {
               const isActive = pathname === item.href;
               return (
@@ -84,6 +86,9 @@ export function Navbar() {
                 </Link>
               );
             })}
+            </div>
+            <p> autonomous trador on solana blockchain powered by <span className="text-orange-400">Claude</span></p>
+
           </nav>
           {config && (
             <span

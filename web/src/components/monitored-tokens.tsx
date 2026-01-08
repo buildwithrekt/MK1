@@ -148,7 +148,7 @@ export function MonitoredTokens({ className }: MonitoredTokensProps) {
       </div>
 
       {/* Table Header */}
-      <div className="px-2 py-1.5 bg-cyan-900/10 border-b border-cyan-500/20 font-mono text-[10px] text-cyan-500 grid grid-cols-[40px_1fr_70px_70px_50px_60px_120px] gap-2 items-center">
+      <div className="px-2 py-1.5 bg-cyan-900/10 border-b border-cyan-500/20 font-mono text-[10px] text-cyan-500 grid grid-cols-[40px_120px_70px_70px_50px_60px_1fr] gap-2 items-center">
         <span></span>
         <span>TOKEN</span>
         <span className="text-right">MC</span>
@@ -176,7 +176,7 @@ export function MonitoredTokens({ className }: MonitoredTokensProps) {
               target="_blank"
               rel="noopener noreferrer"
               className={cn(
-                "grid grid-cols-[40px_1fr_70px_70px_50px_60px_120px] gap-2 items-center",
+                "grid grid-cols-[40px_120px_70px_70px_50px_60px_1fr] gap-2 items-center",
                 "px-2 py-1.5 border-b border-cyan-900/30",
                 "hover:bg-cyan-900/20 transition-colors cursor-pointer",
                 token.all_filters_passed && "bg-green-900/10 border-l-2 border-l-green-500"

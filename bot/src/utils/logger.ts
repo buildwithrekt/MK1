@@ -108,8 +108,8 @@ class Logger {
       try {
         const db = getDatabase();
         await db.log(level, message, this.dbLoggingConfig.max_logs);
-      } catch {
-        // Silently fail
+      } catch (error) {
+        console.error(`[Logger] Failed to save log to DB: ${(error as Error).message}`);
       }
     }
   }

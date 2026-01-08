@@ -9,7 +9,10 @@
     "amount_per_trade_usd": 7,
     "max_positions": 5,
     "slippage_percent": 15,
-    "priority_fee_sol": 0.0005
+    "priority_fee_sol": 0.0005,
+    "default_pool": "pump",
+    "use_jito": false,
+    "post_migration_pool": "auto"
   },
   "entry_rules": {
     "require_scanner_approval": true,

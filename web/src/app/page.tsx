@@ -8,10 +8,13 @@ import { ScannedTokens } from "@/components/scanned-tokens";
 import { MonitoredTokens } from "@/components/monitored-tokens";
 import { TopTrades } from "@/components/top-trades";
 import { PaperTradingBubble } from "@/components/paper-trading-bubble";
+import { AnalysisBanner } from "@/components/analysis-banner";
+import { TradeAnalysisTerminal } from "@/components/trade-analysis-terminal";
 import { toast } from "sonner";
 
 interface Stats {
-  totalPnlUsd: number;
+  totalPnlSol: number;
+  totalPnlPercent: number;
   winRate: number;
   totalTrades: number;
   openPositions: number;
@@ -19,7 +22,8 @@ interface Stats {
 
 export default function Home() {
   const [stats, setStats] = useState<Stats>({
-    totalPnlUsd: 0,
+    totalPnlSol: 0,
+    totalPnlPercent: 0,
     winRate: 0,
     totalTrades: 0,
     openPositions: 0,
@@ -44,21 +48,26 @@ export default function Home() {
 
     fetchWalletAddress();
 
-    // Fetch stats (PNL and win rate only)
-    const fetchBirdeyeStats = async () => {
-      if (document.hidden) return;
+    // Fetch paper trading stats from bot_stats (same as bubble)
+    const fetchPaperStats = async () => {
       try {
-        const res = await fetch("/api/birdeye");
-        if (res.ok) {
-          const data = await res.json();
+        const { data: botStats } = await supabase
+          .from("bot_stats")
+          .select("*")
+          .eq("mode", "paper")
+          .maybeSingle();
+
+        if (botStats) {
           setStats((prev) => ({
             ...prev,
-            totalPnlUsd: data.totalPnlUsd || 0,
-            winRate: (data.winRate || 0) * 100,
+            totalPnlSol: botStats.total_pnl_sol || 0,
+            totalPnlPercent: botStats.total_pnl_percent || 0,
+            winRate: botStats.win_rate || 0,
+            totalTrades: botStats.total_trades || 0,
           }));
         }
       } catch (error) {
-        console.error("Failed to fetch stats:", error);
+        console.error("Failed to fetch paper stats:", error);
       }
     };
 
@@ -71,19 +80,17 @@ export default function Home() {
         .single();
       if (configData) setConfig(configData);
 
-      const { data: trades } = await supabase
+      // Fetch open positions count
+      const { count: openCount } = await supabase
         .from("trades")
-        .select("status");
+        .select("*", { count: "exact", head: true })
+        .eq("dry_run", true)
+        .eq("status", "OPEN");
 
-      if (trades) {
-        const openCount = trades.filter((t) => t.status === "OPEN").length;
-        const closedCount = trades.filter((t) => t.status === "CLOSED").length;
-        setStats((prev) => ({
-          ...prev,
-          openPositions: openCount,
-          totalTrades: closedCount,
-        }));
-      }
+      setStats((prev) => ({
+        ...prev,
+        openPositions: openCount || 0,
+      }));
 
       const { data: logsData } = await supabase
         .from("bot_logs")
@@ -96,10 +103,7 @@ export default function Home() {
     };
 
     fetchData();
-    fetchBirdeyeStats();
-
-    // Refresh stats every 5 minutes
-    const birdeyeInterval = setInterval(fetchBirdeyeStats, 5 * 60 * 1000);
+    fetchPaperStats();
 
     // Setup realtime subscriptions
     const configChannel = supabase
@@ -117,6 +121,15 @@ export default function Home() {
         "postgres_changes",
         { event: "*", schema: "public", table: "trades" },
         () => fetchData()
+      )
+      .subscribe();
+
+    const statsChannel = supabase
+      .channel("bot_stats_realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "bot_stats" },
+        () => fetchPaperStats()
       )
       .subscribe();
 
@@ -140,67 +153,76 @@ export default function Home() {
       .subscribe();
 
     // Backup polling every 30s
-    const pollingInterval = setInterval(fetchData, 30000);
+    const pollingInterval = setInterval(() => {
+      fetchData();
+      fetchPaperStats();
+    }, 30000);
 
     return () => {
-      clearInterval(birdeyeInterval);
       clearInterval(pollingInterval);
       supabase.removeChannel(configChannel);
       supabase.removeChannel(tradesChannel);
+      supabase.removeChannel(statsChannel);
       supabase.removeChannel(logsChannel);
     };
   }, []);
 
-  const formatPnlUsd = (pnl: number) => {
+  const formatPnlSol = (pnl: number) => {
     const sign = pnl >= 0 ? "+" : "";
-    return `${sign}$${Math.abs(pnl).toFixed(2)}`;
+    return `${sign}${pnl.toFixed(4)} SOL`;
   };
 
   return (
     <main>
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        {/* Stats Grid */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {[
-            {
-              label: "TOTAL PNL",
-              value: formatPnlUsd(stats.totalPnlUsd),
-              color: stats.totalPnlUsd >= 0 ? "text-green-400" : "text-red-400",
-              border: stats.totalPnlUsd >= 0 ? "border-green-500/50" : "border-red-500/50",
-            },
-            {
-              label: "WIN RATE",
-              value: `${stats.winRate.toFixed(1)}%`,
-              color: "text-cyan-400",
-              border: "border-cyan-500/50",
-            },
-            {
-              label: "TOTAL TRADES",
-              value: stats.totalTrades.toString(),
-              color: "text-purple-400",
-              border: "border-purple-500/50",
-            },
-            {
-              label: "OPEN POS",
-              value: `${stats.openPositions} / ${config?.max_positions || 5}`,
-              color: "text-orange-400",
-              border: "border-orange-500/50",
-            },
-          ].map((stat) => (
-            <div
-              key={stat.label}
-              className={`rounded-lg border-2 ${stat.border} bg-black p-4 shadow-lg`}
-            >
-              <div className="text-xs text-zinc-500 mb-1">{stat.label}</div>
-              <div className={`text-2xl font-bold ${stat.color} drop-shadow-[0_0_10px_currentColor]`}>
-                {stat.value}
-              </div>
-            </div>
-          ))}
-        </div>
-
         {/* Top Trades Section */}
         <TopTrades />
+        {/* Analysis Banner */}
+        <AnalysisBanner />
+        {/* Trade Analysis Terminal */}
+        <TradeAnalysisTerminal />
+
+        {/* Stats Grid */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {/* PNL Card */}
+          <div
+            className={`rounded-lg border-2 ${stats.totalPnlSol >= 0 ? "border-green-500/50" : "border-red-500/50"} bg-black p-4 shadow-lg`}
+          >
+            <div className="text-xs text-zinc-500 mb-1">TOTAL PNL</div>
+            <div className={`text-2xl font-bold ${stats.totalPnlSol >= 0 ? "text-green-400" : "text-red-400"} drop-shadow-[0_0_10px_currentColor]`}>
+              {formatPnlSol(stats.totalPnlSol)}
+            </div>
+            <div className={`text-xs mt-1 ${stats.totalPnlPercent >= 0 ? "text-green-600" : "text-red-600"}`}>
+              {stats.totalPnlPercent >= 0 ? "+" : ""}{stats.totalPnlPercent.toFixed(1)}%
+            </div>
+          </div>
+
+          {/* Win Rate Card */}
+          <div className="rounded-lg border-2 border-cyan-500/50 bg-black p-4 shadow-lg">
+            <div className="text-xs text-zinc-500 mb-1">WIN RATE</div>
+            <div className="text-2xl font-bold text-cyan-400 drop-shadow-[0_0_10px_currentColor]">
+              {stats.winRate.toFixed(1)}%
+            </div>
+          </div>
+
+          {/* Total Trades Card */}
+          <div className="rounded-lg border-2 border-purple-500/50 bg-black p-4 shadow-lg">
+            <div className="text-xs text-zinc-500 mb-1">TOTAL TRADES</div>
+            <div className="text-2xl font-bold text-purple-400 drop-shadow-[0_0_10px_currentColor]">
+              {stats.totalTrades}
+            </div>
+          </div>
+
+          {/* Open Positions Card */}
+          <div className="rounded-lg border-2 border-orange-500/50 bg-black p-4 shadow-lg">
+            <div className="text-xs text-zinc-500 mb-1">OPEN POS</div>
+            <div className="text-2xl font-bold text-orange-400 drop-shadow-[0_0_10px_currentColor]">
+              {stats.openPositions} / {config?.max_positions || 5}
+            </div>
+          </div>
+        </div>
+
+
 
         {/* Main Grid - Terminal + Sidebar */}
         <div className="grid gap-6 lg:grid-cols-3">

@@ -17,7 +17,7 @@ export interface HeliusEvents {
 
 export interface HeliusConfig {
   reconnectDelayMs?: number;
-  maxReconnectAttempts?: number;
+  maxReconnectAttempts?: number; // Set to 0 for infinite reconnection
 }
 
 export class HeliusService extends EventEmitter {
@@ -41,7 +41,8 @@ export class HeliusService extends EventEmitter {
     this.rpc = new Connection(rpcUrl, 'confirmed');
     this.wsUrl = wsUrl;
     this.reconnectDelay = config?.reconnectDelayMs ?? 1000;
-    this.maxReconnectAttempts = config?.maxReconnectAttempts ?? 10;
+    // 0 = infinite reconnection attempts (default for production stability)
+    this.maxReconnectAttempts = config?.maxReconnectAttempts ?? 0;
   }
 
   async connect(): Promise<void> {
@@ -403,19 +404,41 @@ export class HeliusService extends EventEmitter {
   }
 
   private attemptReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      logger.error('Max reconnection attempts reached');
+    // Check max attempts (0 = infinite)
+    if (this.maxReconnectAttempts > 0 && this.reconnectAttempts >= this.maxReconnectAttempts) {
+      logger.error('Max reconnection attempts reached - RPC connection lost permanently');
+      this.emit('error', new Error('Max reconnection attempts reached'));
       return;
     }
 
     this.reconnectAttempts++;
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
 
-    logger.info(`Attempting reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+    // Cap delay at 60 seconds to avoid excessive wait times
+    const maxDelay = 60000;
+    const delay = Math.min(
+      this.reconnectDelay * Math.pow(2, Math.min(this.reconnectAttempts - 1, 6)),
+      maxDelay
+    );
+
+    // Alert if disconnected for too long (more than 5 attempts = ~1 minute)
+    if (this.reconnectAttempts === 5) {
+      logger.error('⚠️ RPC WebSocket disconnected for extended period - attempting recovery');
+    }
+
+    // Periodic alert every 10 attempts
+    if (this.reconnectAttempts % 10 === 0) {
+      logger.error(`⚠️ RPC WebSocket still disconnected after ${this.reconnectAttempts} attempts`);
+    }
+
+    const attemptsDisplay = this.maxReconnectAttempts > 0
+      ? `${this.reconnectAttempts}/${this.maxReconnectAttempts}`
+      : `${this.reconnectAttempts}/∞`;
+
+    logger.info(`Attempting RPC reconnect in ${delay}ms (attempt ${attemptsDisplay})`);
 
     setTimeout(() => {
       this.connect().catch((error) => {
-        logger.error('Reconnection failed', { error: error.message });
+        logger.error(`RPC reconnection failed: ${error.message}`);
       });
     }, delay);
   }

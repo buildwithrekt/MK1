@@ -36,7 +36,7 @@ function getTradeSubtype(message: string): string | null {
   if (message.includes("🔴 SELL")) return "SELL";
   if (message.includes("📈 OPEN")) return "OPEN";
   if (message.includes("📉 TRAIL")) return "TRAIL";
-  if (message.includes("🟢 PARTIAL")) return "CLOSE_WIN";
+  if (message.includes("🟢 INIT")) return "CLOSE_WIN";
   if (message.includes("🎯 TP")) return "CLOSE_WIN";
   if (message.includes("📊 PRE-MIG")) return "CLOSE_WIN";
   if (message.includes("🚀 MIGRATED")) return "CLOSE_WIN";

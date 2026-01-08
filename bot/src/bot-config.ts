@@ -13,6 +13,9 @@ export interface BotJsonConfig {
     max_positions: number;
     slippage_percent: number;
     priority_fee_sol: number;
+    default_pool?: 'pump' | 'raydium' | 'auto' | 'bonk';
+    use_jito?: boolean;
+    post_migration_pool?: 'pump' | 'raydium' | 'auto';
   };
   entry_rules: {
     require_scanner_approval: boolean;
@@ -71,6 +74,9 @@ export function loadBotConfig(): BotJsonConfig {
         max_positions: 5,
         slippage_percent: 15,
         priority_fee_sol: 0.0005,
+        default_pool: 'pump',
+        use_jito: false,
+        post_migration_pool: 'auto',
       },
       entry_rules: {
         require_scanner_approval: true,

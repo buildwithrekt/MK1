@@ -6,9 +6,37 @@ import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
 
+const siteUrl = process.env.NEXT_PUBLIC_WEBSITE_URL || "https://www.mk1mf.com";
+
 export const metadata: Metadata = {
-  title: "PumpFun Bot Dashboard",
-  description: "Trading bot dashboard for PumpFun on Solana",
+  title: "mk1 advanced trading bot",
+  description: "autonomous trading bot for memecoins on Solana",
+  metadataBase: new URL(siteUrl),
+  openGraph: {
+    title: "mk1 advanced trading bot",
+    description: "autonomous trading bot for memecoins on Solana",
+    url: siteUrl,
+    siteName: "mk1",
+    images: [
+      {
+        url: "/assets/seo_banner.jpg",
+        width: 1200,
+        height: 630,
+        alt: "mk1 trading bot",
+      },
+    ],
+    locale: "en_US",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "mk1 advanced trading bot",
+    description: "autonomous trading bot for memecoins on Solana",
+    images: ["/assets/seo_banner.jpg"],
+  },
+  icons: {
+    icon: "/favicon.ico",
+  },
 };
 
 export default function RootLayout({

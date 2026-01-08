@@ -96,6 +96,9 @@ export async function GET() {
   return NextResponse.json({
     walletPublicKey: process.env.WALLET_PUBLIC_KEY || "",
     rpcUrl: process.env.RPC_URL ? "configured" : "not configured",
+    startingBalanceSol: process.env.STARTING_BALANCE_SOL
+      ? parseFloat(process.env.STARTING_BALANCE_SOL)
+      : 10,
     botConfig,
     scanConfig,
   });

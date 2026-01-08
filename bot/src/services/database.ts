@@ -290,7 +290,7 @@ export class DatabaseService {
     });
 
     if (error) {
-      // Silently fail
+      console.error(`[DB] Failed to insert log: ${error.message}`);
     }
 
     // Cleanup old logs periodically
@@ -400,7 +400,9 @@ export class DatabaseService {
       // Create the row if it doesn't exist
       if (!currentStats) {
         console.log(`Creating bot_stats row for mode: ${mode}`);
-        const initialBalance = 0.5;
+        const initialBalance = process.env.STARTING_BALANCE_SOL
+          ? parseFloat(process.env.STARTING_BALANCE_SOL)
+          : 10;
         const { error: insertError } = await this.supabase
           .from('bot_stats')
           .insert({
@@ -478,12 +480,15 @@ export class DatabaseService {
     }
   }
 
-  async resetBotStats(mode: 'paper' | 'live', initialBalance: number = 0.5): Promise<void> {
+  async resetBotStats(mode: 'paper' | 'live', initialBalance?: number): Promise<void> {
+    const balance = initialBalance ?? (process.env.STARTING_BALANCE_SOL
+      ? parseFloat(process.env.STARTING_BALANCE_SOL)
+      : 10);
     const { error } = await this.supabase
       .from('bot_stats')
       .update({
-        initial_balance: initialBalance,
-        current_balance: initialBalance,
+        initial_balance: balance,
+        current_balance: balance,
         total_pnl_sol: 0,
         total_pnl_percent: 0,
         total_trades: 0,
@@ -536,8 +541,8 @@ export class DatabaseService {
             .in('id', oldEntries.map(e => e.id));
         }
       }
-    } catch {
-      // Silently fail
+    } catch (error) {
+      console.error(`[DB] Failed to cleanup logs: ${(error as Error).message}`);
     }
   }
 
@@ -590,7 +595,8 @@ export class DatabaseService {
     }, { onConflict: 'mint' });
 
     if (error) {
-      // Silently fail - don't spam logs
+      // Log but don't throw - monitored tokens are non-critical
+      console.error(`[DB] Failed to upsert monitored token ${token.mint.slice(0, 8)}: ${error.message}`);
     }
   }
 
