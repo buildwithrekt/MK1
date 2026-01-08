@@ -208,14 +208,14 @@ async function main() {
       const birdeyeResult = await fetchAndValidateToken(token.mint, scanConfig.birdeye_filters);
 
       if (!birdeyeResult.passed) {
-        logger.info(`❌ Birdeye rejected ${token.symbol}: ${birdeyeResult.reasons.join(', ')}`);
+        logger.info(`❌ REJECTED: ${token.symbol}: ${birdeyeResult.reasons.join(', ')}`);
         return;
       }
 
       // Log Birdeye data
       if (birdeyeResult.data) {
         const be = birdeyeResult.data;
-        logger.info(`✅ Birdeye OK ${token.symbol} | Liq: $${be.liquidity.toFixed(0)} | Progress: ${be.meme_info.progress_percent.toFixed(1)}%`);
+        logger.info(`✅ PASS ${token.symbol} | Liq: $${be.liquidity.toFixed(0)} | Progress: ${be.meme_info.progress_percent.toFixed(1)}%`);
       }
     }
 
