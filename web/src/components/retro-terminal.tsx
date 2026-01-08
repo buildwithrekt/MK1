@@ -184,7 +184,7 @@ export function RetroTerminal({ logs, className, maxHeight = "500px" }: RetroTer
         <div
           ref={terminalRef}
           onScroll={handleScroll}
-          className="overflow-y-auto font-mono text-sm p-4 space-y-1 bg-black/80"
+          className="overflow-y-auto font-mono text-sm p-4 space-y-1 bg-black/80 terminal-scrollbar"
           style={{ maxHeight }}
         >
           {logs.length === 0 ? (

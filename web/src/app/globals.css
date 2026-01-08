@@ -57,3 +57,29 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Terminal specific - Green scrollbar */
+.terminal-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(142 70% 45%) transparent;
+}
+
+.terminal-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.terminal-scrollbar::-webkit-scrollbar-track {
+  background: hsl(142 50% 10% / 0.3);
+  border-radius: 3px;
+}
+
+.terminal-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(142 70% 40% / 0.7);
+  border-radius: 3px;
+}
+
+.terminal-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: hsl(142 70% 50%);
+  box-shadow: 0 0 8px hsl(142 70% 45% / 0.6);
+}

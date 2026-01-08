@@ -5,6 +5,8 @@ import { supabase, type BotConfig, type BotLog } from "@/lib/supabase";
 import { RetroTerminal, type LogEntry } from "@/components/retro-terminal";
 import { WalletInfo } from "@/components/wallet-info";
 import { ScannedTokens } from "@/components/scanned-tokens";
+import { MonitoredTokens } from "@/components/monitored-tokens";
+import { TopTrades } from "@/components/top-trades";
 import { PaperTradingBubble } from "@/components/paper-trading-bubble";
 import { toast } from "sonner";
 
@@ -208,11 +210,15 @@ export default function Home() {
           ))}
         </div>
 
+        {/* Top Trades Section */}
+        <TopTrades />
+
         {/* Main Grid - Terminal + Sidebar */}
         <div className="grid gap-6 lg:grid-cols-3">
-          {/* Terminal - Takes 2 columns */}
-          <div className="lg:col-span-2">
-            <RetroTerminal logs={logs} maxHeight="500px" />
+          {/* Left Column - Terminal + Monitored Tokens */}
+          <div className="lg:col-span-2 space-y-6">
+            <RetroTerminal logs={logs} maxHeight="400px" />
+            <MonitoredTokens />
           </div>
 
           {/* Sidebar */}
