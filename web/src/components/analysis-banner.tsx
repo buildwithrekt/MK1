@@ -227,6 +227,15 @@ export function AnalysisBanner() {
         ))}
       </div>
 
+      {/* Info message */}
+      {!isComplete && (
+        <div className="mt-3 text-center">
+          <span className="text-zinc-500 text-xs font-mono">
+            on-chain trading will begin once analysis reaches 100%
+          </span>
+        </div>
+      )}
+
       {/* CSS animations */}
       <style jsx>{`
         @keyframes shimmer {

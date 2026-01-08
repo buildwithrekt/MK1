@@ -14,28 +14,30 @@ export const WalletInfo = React.memo(function WalletInfo({ publicKey, className 
   const [loading, setLoading] = React.useState(true);
   const [copied, setCopied] = React.useState(false);
 
-  React.useEffect(() => {
-    const fetchBalance = async () => {
-      try {
-        const res = await fetch(`/api/wallet?address=${publicKey}`);
-        const data = await res.json();
-        if (data.balance !== undefined) {
-          setBalance(data.balance);
-        }
-      } catch (error) {
-        console.error("Failed to fetch balance:", error);
-      } finally {
-        setLoading(false);
+  const fetchBalance = React.useCallback(async () => {
+    if (!publicKey) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/wallet?address=${publicKey}&t=${Date.now()}`);
+      const data = await res.json();
+      if (data.balance !== undefined) {
+        setBalance(data.balance);
       }
-    };
+    } catch (error) {
+      console.error("Failed to fetch balance:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [publicKey]);
 
+  React.useEffect(() => {
     if (publicKey) {
       fetchBalance();
       // Refresh every 30 seconds
       const interval = setInterval(fetchBalance, 30000);
       return () => clearInterval(interval);
     }
-  }, [publicKey]);
+  }, [publicKey, fetchBalance]);
 
   const copyAddress = () => {
     navigator.clipboard.writeText(publicKey);
@@ -82,7 +84,16 @@ export const WalletInfo = React.memo(function WalletInfo({ publicKey, className 
 
         {/* Balance */}
         <div className="space-y-1">
-          <div className="text-purple-600 text-xs">BALANCE:</div>
+          <div className="flex items-center justify-between">
+            <div className="text-purple-600 text-xs">BALANCE:</div>
+            <button
+              onClick={fetchBalance}
+              disabled={loading}
+              className="text-purple-600 hover:text-purple-400 text-xs disabled:opacity-50"
+            >
+              {loading ? "..." : "[REFRESH]"}
+            </button>
+          </div>
           <div className="flex items-baseline gap-2">
             {loading ? (
               <span className="text-purple-400 animate-pulse">LOADING...</span>
