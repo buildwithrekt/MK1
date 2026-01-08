@@ -7,8 +7,15 @@ export function PaperTradingBubble() {
   const [stats, setStats] = React.useState<BotStats | null>(null);
   const [openPositions, setOpenPositions] = React.useState(0);
   const [isExpanded, setIsExpanded] = React.useState(true);
+  const errorCountRef = React.useRef(0);
+  const lastFetchRef = React.useRef(0);
 
   const fetchData = React.useCallback(async () => {
+    // Prevent too frequent calls (min 2s between fetches)
+    const now = Date.now();
+    if (now - lastFetchRef.current < 2000) return;
+    lastFetchRef.current = now;
+
     try {
       const { data: statsData, error } = await supabase
         .from("bot_stats")
@@ -17,10 +24,10 @@ export function PaperTradingBubble() {
         .maybeSingle();
 
       if (statsData && !error) {
-        console.log('[PaperBubble] Stats fetched:', statsData.total_trades, 'trades, PNL:', statsData.total_pnl_sol);
+        errorCountRef.current = 0; // Reset on success
         setStats(statsData);
       } else if (error) {
-        console.error('[PaperBubble] Fetch error:', error);
+        errorCountRef.current++;
       }
 
       // Fetch open positions count
@@ -31,8 +38,8 @@ export function PaperTradingBubble() {
         .eq("status", "OPEN");
 
       setOpenPositions(count || 0);
-    } catch (err) {
-      // Silent fail, use defaults
+    } catch {
+      errorCountRef.current++;
     }
   }, []);
 
@@ -58,11 +65,16 @@ export function PaperTradingBubble() {
       )
       .subscribe();
 
-    // Polling every 5 seconds
-    const interval = setInterval(fetchData, 5000);
+    // Adaptive polling: 10s normally, backs off on errors (max 60s)
+    const intervalId = setInterval(() => {
+      const backoffMs = Math.min(10000 * Math.pow(2, errorCountRef.current), 60000);
+      if (Date.now() - lastFetchRef.current >= backoffMs) {
+        fetchData();
+      }
+    }, 5000);
 
     return () => {
-      clearInterval(interval);
+      clearInterval(intervalId);
       supabase.removeChannel(statsChannel);
       supabase.removeChannel(tradesChannel);
     };

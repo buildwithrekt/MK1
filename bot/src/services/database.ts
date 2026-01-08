@@ -106,24 +106,26 @@ export class DatabaseService {
   // ============== TRADES ==============
 
   async createTrade(trade: NewTrade): Promise<Trade> {
-    const { data, error } = await this.supabase
-      .from('trades')
-      .insert({
-        token_address: trade.token_address,
-        token_name: trade.token_name,
-        bonding_curve: trade.bonding_curve,
-        entry_price: trade.entry_price,
-        amount_sol: trade.amount_sol,
-        token_amount: trade.token_amount,
-        dry_run: trade.dry_run,
-        image_uri: trade.image_uri,
-        status: 'OPEN',
-      })
-      .select()
-      .single();
+    return withRetry(async () => {
+      const { data, error } = await this.supabase
+        .from('trades')
+        .insert({
+          token_address: trade.token_address,
+          token_name: trade.token_name,
+          bonding_curve: trade.bonding_curve,
+          entry_price: trade.entry_price,
+          amount_sol: trade.amount_sol,
+          token_amount: trade.token_amount,
+          dry_run: trade.dry_run,
+          image_uri: trade.image_uri,
+          status: 'OPEN',
+        })
+        .select()
+        .single();
 
-    if (error) throw error;
-    return data;
+      if (error) throw error;
+      return data;
+    }, 3, 500);
   }
 
   async updateTrade(id: string, update: UpdateTrade): Promise<Trade> {
@@ -145,14 +147,14 @@ export class DatabaseService {
     pnlSol: number,
     pnlPercent: number
   ): Promise<Trade> {
-    return this.updateTrade(id, {
+    return withRetry(() => this.updateTrade(id, {
       exit_price: exitPrice,
       exit_time: new Date(),
       exit_reason: exitReason,
       pnl_sol: pnlSol,
       pnl_percent: pnlPercent,
       status: 'CLOSED',
-    });
+    }), 3, 500);
   }
 
   async getOpenTrades(dryRun?: boolean): Promise<Trade[]> {
@@ -254,7 +256,7 @@ export class DatabaseService {
   async updateFullConfig(config: Partial<FullBotConfig>): Promise<FullBotConfig> {
     const current = await this.getConfig();
 
-    const { data, error } = await this.supabase
+    const { error } = await this.supabase
       .from('bot_config')
       .update({
         is_running: config.is_running,
@@ -284,13 +286,16 @@ export class DatabaseService {
   async log(type: 'INFO' | 'WARN' | 'ERROR' | 'TRADE', message: string, maxLogs?: number): Promise<void> {
     if (maxLogs) this.maxLogs = maxLogs;
 
-    const { error } = await this.supabase.from('bot_logs').insert({
-      type,
-      message,
-    });
-
-    if (error) {
-      console.error(`[DB] Failed to insert log: ${error.message}`);
+    try {
+      await withRetry(async () => {
+        const { error } = await this.supabase.from('bot_logs').insert({
+          type,
+          message,
+        });
+        if (error) throw error;
+      }, 3, 300);
+    } catch (error) {
+      console.error(`[DB] Failed to insert log: ${(error as Error).message}`);
     }
 
     // Cleanup old logs periodically
@@ -454,27 +459,27 @@ export class DatabaseService {
       const newBestTrade = Math.max(currentStats.best_trade_pnl_percent, pnlPercent);
       const newWorstTrade = Math.min(currentStats.worst_trade_pnl_percent, pnlPercent);
 
-      const { error } = await this.supabase
-        .from('bot_stats')
-        .update({
-          current_balance: newCurrentBalance,
-          total_pnl_sol: newTotalPnlSol,
-          total_pnl_percent: newTotalPnlPercent,
-          total_trades: newTotalTrades,
-          winning_trades: newWinningTrades,
-          losing_trades: newLosingTrades,
-          win_rate: newWinRate,
-          best_trade_pnl_percent: newBestTrade,
-          worst_trade_pnl_percent: newWorstTrade,
-          total_volume_sol: newTotalVolume,
-          avg_trade_pnl_percent: newAvgTradePnl,
-          last_trade_at: new Date().toISOString(),
-        })
-        .eq('mode', mode);
+      await withRetry(async () => {
+        const { error } = await this.supabase
+          .from('bot_stats')
+          .update({
+            current_balance: newCurrentBalance,
+            total_pnl_sol: newTotalPnlSol,
+            total_pnl_percent: newTotalPnlPercent,
+            total_trades: newTotalTrades,
+            winning_trades: newWinningTrades,
+            losing_trades: newLosingTrades,
+            win_rate: newWinRate,
+            best_trade_pnl_percent: newBestTrade,
+            worst_trade_pnl_percent: newWorstTrade,
+            total_volume_sol: newTotalVolume,
+            avg_trade_pnl_percent: newAvgTradePnl,
+            last_trade_at: new Date().toISOString(),
+          })
+          .eq('mode', mode);
 
-      if (error) {
-        console.error('Failed to update bot stats:', error);
-      }
+        if (error) throw error;
+      }, 3, 500);
     } catch (err) {
       console.error('Error updating bot stats:', err);
     }
@@ -648,12 +653,15 @@ export class DatabaseService {
       last_updated_at: new Date().toISOString(),
     }));
 
-    const { error } = await this.supabase
-      .from('monitored_tokens')
-      .upsert(records, { onConflict: 'mint' });
-
-    if (error) {
-      console.error('❌ Failed to bulk upsert monitored tokens:', error.message);
+    try {
+      await withRetry(async () => {
+        const { error } = await this.supabase
+          .from('monitored_tokens')
+          .upsert(records, { onConflict: 'mint' });
+        if (error) throw error;
+      }, 3, 500);
+    } catch (error) {
+      console.error('❌ Failed to bulk upsert monitored tokens:', (error as Error).message);
     }
   }
 
@@ -695,6 +703,37 @@ export class DatabaseService {
     if (error) return [];
     return data || [];
   }
+}
+
+// Retry helper with exponential backoff
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelayMs: number = 500
+): Promise<T> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error as Error;
+      const isRetryable =
+        lastError.message?.includes('timeout') ||
+        lastError.message?.includes('connection') ||
+        lastError.message?.includes('ECONNRESET') ||
+        lastError.message?.includes('upstream');
+
+      if (!isRetryable || attempt === maxRetries - 1) {
+        throw lastError;
+      }
+
+      const delay = baseDelayMs * Math.pow(2, attempt);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError;
 }
 
 // Singleton instance

@@ -74,8 +74,15 @@ const FilterBadge = ({ ok, label }: { ok: boolean; label: string }) => (
 export function MonitoredTokens({ className }: MonitoredTokensProps) {
   const [tokens, setTokens] = React.useState<MonitoredToken[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const errorCountRef = React.useRef(0);
+  const lastFetchRef = React.useRef(0);
 
   const fetchTokens = React.useCallback(async () => {
+    // Prevent too frequent calls (min 2s between fetches)
+    const now = Date.now();
+    if (now - lastFetchRef.current < 2000) return;
+    lastFetchRef.current = now;
+
     try {
       const { data, error } = await supabase
         .from("monitored_tokens")
@@ -84,10 +91,13 @@ export function MonitoredTokens({ className }: MonitoredTokensProps) {
         .limit(100);
 
       if (data && !error) {
+        errorCountRef.current = 0;
         setTokens(data);
+      } else if (error) {
+        errorCountRef.current++;
       }
-    } catch (error) {
-      console.error("Failed to fetch monitored tokens:", error);
+    } catch {
+      errorCountRef.current++;
     } finally {
       setLoading(false);
     }
@@ -106,12 +116,17 @@ export function MonitoredTokens({ className }: MonitoredTokensProps) {
       )
       .subscribe();
 
-    // Refresh every 5 seconds for smooth updates
-    const interval = setInterval(fetchTokens, 5000);
+    // Adaptive polling: 10s normally, backs off on errors (max 60s)
+    const intervalId = setInterval(() => {
+      const backoffMs = Math.min(10000 * Math.pow(2, errorCountRef.current), 60000);
+      if (Date.now() - lastFetchRef.current >= backoffMs) {
+        fetchTokens();
+      }
+    }, 5000);
 
     return () => {
       supabase.removeChannel(channel);
-      clearInterval(interval);
+      clearInterval(intervalId);
     };
   }, [fetchTokens]);
 
