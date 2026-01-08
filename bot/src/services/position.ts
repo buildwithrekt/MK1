@@ -101,7 +101,7 @@ export class PositionManager extends EventEmitter {
     this.positions.set(mint, position);
     this.entryMarketCaps.set(mint, marketCapUsd); // Save entry MC for close log
 
-    const tokenDisplay = `${tokenName || mint.slice(0, 8)} (${mint.slice(0, 4)})`;
+    const tokenDisplay = tokenName || 'Unknown';
     const mcDisplay = marketCapUsd >= 1000 ? `$${(marketCapUsd/1000).toFixed(1)}K` : `$${marketCapUsd.toFixed(0)}`;
     logger.trade(`📈 OPEN ${tokenDisplay} | ${solAmount.toFixed(3)} SOL | MC: ${mcDisplay} | Pos: ${this.positions.size}/${this.config.max_positions}`);
 
@@ -305,14 +305,19 @@ export class PositionManager extends EventEmitter {
 
     const soldSol = result.solAmount || 0;
     const pnlPercent = position.pnlPercent;
-    const tokenDisplay = `${position.tokenName} (${position.mint.slice(0, 4)})`;
+    const tokenDisplay = position.tokenName || 'Unknown';
     const reasonLabel: Record<string, string> = {
       'TP': '🎯 TP',
       'PRE_MIGRATION': '📊 PRE-MIG',
       'POST_MIGRATION': '🚀 POST-MIG',
     };
 
-    logger.trade(`🟢 PARTIAL ${tokenDisplay} | ${reasonLabel[reason] || reason} | Sold ${sellPercent}% | +${pnlPercent.toFixed(1)}% | +${soldSol.toFixed(4)} SOL`);
+    // Format market caps
+    const formatMc = (mc: number) => mc >= 1000 ? `$${(mc/1000).toFixed(1)}K` : `$${mc.toFixed(0)}`;
+    const entryMcDisplay = formatMc(this.entryMarketCaps.get(position.mint) || position.marketCapUsd);
+    const exitMcDisplay = formatMc(position.marketCapUsd);
+
+    logger.trade(`🟢 PARTIAL ${tokenDisplay} | ${reasonLabel[reason] || reason} | Sold ${sellPercent}% | +${pnlPercent.toFixed(1)}% | +${soldSol.toFixed(4)} SOL | MC: ${entryMcDisplay} → ${exitMcDisplay}`);
 
     // If no tokens left, close position
     if (position.tokenAmount <= 0n) {
@@ -365,7 +370,7 @@ export class PositionManager extends EventEmitter {
 
     this.positions.delete(mint);
 
-    const tokenDisplay = `${position.tokenName || mint.slice(0, 8)} (${mint.slice(0, 4)})`;
+    const tokenDisplay = position.tokenName || 'Unknown';
     const duration = this.formatDuration(Date.now() - position.entryTime.getTime());
     const pnlSign = pnlSol >= 0 ? '+' : '';
     const pnlColor = pnlSol >= 0 ? '🟢' : '🟠';

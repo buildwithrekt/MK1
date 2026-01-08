@@ -53,7 +53,7 @@ export class ExecutorService {
     slippage?: number,
     tokenName?: string
   ): Promise<TransactionResult> {
-    const displayName = tokenName || mint.slice(0, 8);
+    const displayName = tokenName || 'Unknown';
 
     if (this.dryRun) {
       return this.simulateBuy(mint, solAmount, displayName);
@@ -91,7 +91,7 @@ export class ExecutorService {
     slippage?: number,
     tokenName?: string
   ): Promise<TransactionResult> {
-    const displayName = tokenName || mint.slice(0, 8);
+    const displayName = tokenName || 'Unknown';
 
     if (this.dryRun) {
       return this.simulateSell(mint, tokenAmount, displayName);

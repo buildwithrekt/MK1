@@ -73,11 +73,21 @@ async function main() {
   await priceService.start();
   console.log(`✅ SOL Price: $${priceService.getSolPrice().toFixed(2)}`);
 
+  // Configure logger with scan config
+  logger.setLoggingConfig(scanConfig.logging);
+  logger.setDbLoggingConfig({
+    save_logs: scanConfig.database.save_logs,
+    max_logs: scanConfig.database.max_logs,
+  });
+
   // Enable database if configured
   let db: ReturnType<typeof getDatabase> | null = null;
   if (envConfig.supabaseUrl && envConfig.supabaseServiceRoleKey) {
     logger.enableDatabase();
     db = getDatabase();
+    // Set database limits from config
+    db.setMaxLogs(scanConfig.database.max_logs);
+    db.setMaxPassedTokens(scanConfig.database.max_passed_tokens);
     console.log('✅ Database enabled');
   } else {
     console.log('⚠️  Database disabled');
@@ -99,8 +109,11 @@ async function main() {
 
   const exitRules: ExitRules = jsonConfig.exit_rules;
 
-  // Initialize services
-  const pumpPortal = new PumpPortalService(scanConfig.scanner.websocket_url);
+  // Initialize services with config
+  const pumpPortal = new PumpPortalService(scanConfig.scanner.websocket_url, {
+    reconnectDelayMs: scanConfig.scanner.reconnect_delay_ms,
+    maxReconnectAttempts: scanConfig.scanner.max_reconnect_attempts,
+  });
   const executor = new ExecutorService(
     jsonConfig.api.rpc_url,
     envConfig.pumpPortalApiKey,
@@ -132,6 +145,9 @@ async function main() {
   // Terminal settings
   const SHOW_NEW_TOKENS = scanConfig.terminal.show_new_tokens;
   const SHOW_MONITORING_COUNT = scanConfig.terminal.show_monitoring_count;
+  const SHOW_ZONE_ENTRIES = scanConfig.terminal.show_zone_entries;
+  const SHOW_MOMENTUM = scanConfig.terminal.show_momentum;
+  const SHOW_SYSTEM_LOGS = scanConfig.terminal.show_system_logs;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // CHECK IF TOKEN PASSES ALL ENTRY FILTERS
@@ -296,8 +312,8 @@ async function main() {
       }
     }
 
-    // Log if enabled
-    if (SHOW_NEW_TOKENS) {
+    // Log if enabled (terminal or logging config)
+    if (SHOW_NEW_TOKENS || scanConfig.logging.new_tokens) {
       console.log(`📡 Monitoring: ${tokenName} | MC: ${priceService.formatUsd(mcUsd)}`);
     }
 
@@ -367,6 +383,12 @@ async function main() {
     if (!token.entryAttempted) {
       const { passed } = checkEntryFilters(token);
       if (passed) {
+        // Log zone entry if enabled (terminal or logging config)
+        if (SHOW_ZONE_ENTRIES || scanConfig.logging.token_entered_zone) {
+          const marketCapUsd = priceService.solToUsd(token.marketCapSol);
+          const buyVolumeUsd = priceService.solToUsd(token.totalBuyVolume);
+          console.log(`🎯 ZONE ENTRY: ${token.symbol} | MC: ${priceService.formatUsd(marketCapUsd)} | Vol: ${priceService.formatUsd(buyVolumeUsd)} | Buyers: ${token.uniqueBuyers.size}`);
+        }
         tryEnterPosition(token);
       }
     }
@@ -391,7 +413,7 @@ async function main() {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // CLEANUP - Remove old tokens from monitoring
+  // CLEANUP & PERIODIC RECAP - Remove old tokens and show full status
   // ═══════════════════════════════════════════════════════════════════════════
   setInterval(() => {
     const now = Date.now();
@@ -408,11 +430,156 @@ async function main() {
       pumpPortal.unsubscribeTokenTrades([mint]);
     }
 
-    // Log monitoring count
-    if (SHOW_MONITORING_COUNT && monitoringTokens.size > 0) {
-      console.log(`📊 Monitoring: ${monitoringTokens.size} tokens`);
+    // ═══════════════════════════════════════════════════════════════════════════
+    // TERMINAL RECAP - Full status every 30 seconds
+    // ═══════════════════════════════════════════════════════════════════════════
+    console.log('');
+    console.log('╔══════════════════════════════════════════════════════════════════════════════╗');
+    console.log(`║  📊 STATUS RECAP                                              ${new Date().toLocaleTimeString('fr-FR')}  ║`);
+    console.log('╠══════════════════════════════════════════════════════════════════════════════╣');
+
+    // OPEN POSITIONS
+    const openPositions = positionManager.getOpenPositions();
+    if (openPositions.length > 0) {
+      console.log('║  💼 OPEN POSITIONS                                                           ║');
+      console.log('╟──────────────────────────────────────────────────────────────────────────────╢');
+      for (const pos of openPositions) {
+        const pnlSign = pos.pnlPercent >= 0 ? '+' : '';
+        const pnlColor = pos.pnlPercent >= 0 ? '🟢' : '🔴';
+        const entryMc = priceService.formatUsd(pos.marketCapUsd || 0);
+        const currentMc = priceService.formatUsd(pos.marketCapUsd || 0);
+        const duration = formatDuration(now - pos.entryTime.getTime());
+        const tokenName = (pos.tokenName || 'Unknown').padEnd(12).slice(0, 12);
+        console.log(`║  ${pnlColor} ${tokenName} │ PnL: ${pnlSign}${pos.pnlPercent.toFixed(1).padStart(6)}% │ MC: ${entryMc.padStart(7)} │ ${duration.padStart(6)} ║`);
+      }
+    } else {
+      console.log('║  💼 POSITIONS: Aucune position ouverte                                       ║');
     }
+
+    console.log('╟──────────────────────────────────────────────────────────────────────────────╢');
+
+    // MONITORING STATS
+    const scoredTokens = Array.from(monitoringTokens.values())
+      .map(token => {
+        const mcUsd = priceService.solToUsd(token.marketCapSol);
+        const volUsd = priceService.solToUsd(token.totalBuyVolume);
+        const buyers = token.uniqueBuyers.size;
+        const ratio = token.totalSellVolume > 0
+          ? token.totalBuyVolume / token.totalSellVolume
+          : token.totalBuyVolume > 0 ? 999 : 0;
+
+        const mcOk = mcUsd >= TARGET_MIN_MC && mcUsd <= TARGET_MAX_MC;
+        const volOk = volUsd >= MIN_VOLUME;
+        const buyersOk = buyers >= MIN_BUYERS;
+        const ratioOk = ratio >= BUY_SELL_RATIO;
+        const devOk = !DEV_MUST_SELL || token.devSold;
+        const allPassed = mcOk && volOk && buyersOk && ratioOk && devOk;
+
+        return { token, mcUsd, volUsd, buyers, ratio, mcOk, volOk, buyersOk, ratioOk, devOk, allPassed };
+      });
+
+    const passingTokens = scoredTokens.filter(t => t.allPassed).sort((a, b) => b.volUsd - a.volUsd).slice(0, 5);
+    const approachingZone = scoredTokens
+      .filter(t => !t.allPassed && t.mcUsd >= TARGET_MIN_MC * 0.7 && t.mcUsd <= TARGET_MAX_MC)
+      .sort((a, b) => b.mcUsd - a.mcUsd)
+      .slice(0, 3);
+
+    console.log(`║  📡 MONITORING: ${monitoringTokens.size} tokens │ ${passingTokens.length} passing filters │ ${expiredTokens.length} expired      ║`);
+
+    if (passingTokens.length > 0) {
+      console.log('╟──────────────────────────────────────────────────────────────────────────────╢');
+      console.log('║  🎯 READY TO ENTER (passing all filters)                                     ║');
+      for (const t of passingTokens) {
+        const symbol = t.token.symbol.padEnd(10).slice(0, 10);
+        const mc = priceService.formatUsd(t.mcUsd).padStart(7);
+        const vol = priceService.formatUsd(t.volUsd).padStart(7);
+        console.log(`║     ${symbol} │ MC: ${mc} │ Vol: ${vol} │ Buyers: ${String(t.buyers).padStart(2)} │ Dev: ${t.devOk ? '✓' : '✗'}  ║`);
+      }
+    }
+
+    if (approachingZone.length > 0) {
+      console.log('╟──────────────────────────────────────────────────────────────────────────────╢');
+      console.log('║  ⏳ APPROACHING ZONE                                                         ║');
+      for (const t of approachingZone) {
+        const symbol = t.token.symbol.padEnd(10).slice(0, 10);
+        const mc = priceService.formatUsd(t.mcUsd).padStart(7);
+        const missing: string[] = [];
+        if (!t.volOk) missing.push('vol');
+        if (!t.buyersOk) missing.push('buyers');
+        if (!t.devOk) missing.push('dev');
+        if (!t.ratioOk) missing.push('ratio');
+        console.log(`║     ${symbol} │ MC: ${mc} │ Need: ${missing.join(', ').padEnd(20)}          ║`);
+      }
+    }
+
+    console.log('╚══════════════════════════════════════════════════════════════════════════════╝');
+    console.log('');
   }, 30000); // Every 30 seconds
+
+  // Helper function for duration formatting
+  function formatDuration(ms: number): string {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    if (minutes > 0) return `${minutes}m${seconds % 60}s`;
+    return `${seconds}s`;
+  }
+
+  // Sync monitored tokens to database every 10 seconds
+  if (db) {
+    setInterval(async () => {
+      try {
+        // Clean expired tokens from DB
+        await db!.deleteExpiredMonitoredTokens();
+
+        // Build list of tokens with their current state
+        const tokensToSync = Array.from(monitoringTokens.values()).map(token => {
+          const mcUsd = priceService.solToUsd(token.marketCapSol);
+          const volUsd = priceService.solToUsd(token.totalBuyVolume);
+          const buyers = token.uniqueBuyers.size;
+          const ratio = token.totalSellVolume > 0
+            ? token.totalBuyVolume / token.totalSellVolume
+            : token.totalBuyVolume > 0 ? 999 : 0;
+
+          // Check each filter
+          const mcOk = mcUsd >= TARGET_MIN_MC && mcUsd <= TARGET_MAX_MC;
+          const volOk = volUsd >= MIN_VOLUME;
+          const buyersOk = buyers >= MIN_BUYERS;
+          const ratioOk = ratio >= BUY_SELL_RATIO;
+          const devOk = !DEV_MUST_SELL || token.devSold;
+          const allPassed = mcOk && volOk && buyersOk && ratioOk && devOk;
+
+          return {
+            mint: token.mint,
+            name: token.name,
+            symbol: token.symbol,
+            imageUri: token.uri,
+            creator: token.creator,
+            bondingCurve: token.bondingCurve,
+            marketCapSol: token.marketCapSol,
+            marketCapUsd: mcUsd,
+            totalBuyVolumeSol: token.totalBuyVolume,
+            totalSellVolumeSol: token.totalSellVolume,
+            buyVolumeUsd: volUsd,
+            uniqueBuyers: buyers,
+            buySellRatio: ratio,
+            devSold: token.devSold,
+            mcOk,
+            volOk,
+            buyersOk,
+            ratioOk,
+            allFiltersPassed: allPassed,
+            expiresAt: new Date(token.createdAt + MONITORING_DURATION_MS),
+          };
+        });
+
+        if (tokensToSync.length > 0) {
+          await db!.bulkUpsertMonitoredTokens(tokensToSync);
+        }
+      } catch {
+        // Silently fail
+      }
+    }, 10000); // Every 10 seconds
+  }
 
   // Heartbeat
   if (db) {
