@@ -362,10 +362,20 @@ async function main() {
         const be = birdeyeResult.data;
         logger.info(`✅ PASS ${token.symbol} | Liq: $${be.liquidity.toFixed(0)} | Progress: ${be.meme_info.progress_percent.toFixed(1)}%`);
 
-        // Use Birdeye logo if we don't have one yet
-        if (!token.logoUri && be.logo_uri) {
+        // Use Birdeye logo
+        if (be.logo_uri) {
           token.logoUri = be.logo_uri;
         }
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // FETCH LOGO - Only fetch logo for tokens that passed all filters
+    // ═══════════════════════════════════════════════════════════════════════════
+    if (!token.logoUri && token.uri) {
+      const logoUri = await fetchTokenLogo(token.mint, token.uri);
+      if (logoUri) {
+        token.logoUri = logoUri;
       }
     }
 
@@ -461,13 +471,6 @@ async function main() {
     };
 
     monitoringTokens.set(data.mint, token);
-
-    // Fetch logo in background - tries metadata URI first, then Birdeye
-    fetchTokenLogo(data.mint, data.uri).then(logoUri => {
-      if (logoUri && monitoringTokens.has(data.mint)) {
-        token.logoUri = logoUri;
-      }
-    }).catch(() => {});
 
     // Subscribe to trades
     pumpPortal.subscribeTokenTrades([data.mint]);
@@ -704,7 +707,6 @@ async function main() {
             mint: token.mint,
             name: token.name,
             symbol: token.symbol,
-            imageUri: token.logoUri || undefined, // Use actual logo from Birdeye, not metadata URI
             creator: token.creator,
             bondingCurve: token.bondingCurve,
             marketCapSol: token.marketCapSol,
