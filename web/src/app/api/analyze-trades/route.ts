@@ -111,13 +111,13 @@ ${trades.slice(0, 15).map((t) =>
 
 ---
 
-tu dois analyser ces trades et donner des conseils d'amélioration. respecte STRICTEMENT le profil ci-dessus (minuscules, slang, ego, etc).
+tu es ce bot de trading. analyse TES PROPRES trades ci-dessous et commente ta performance. parle à la PREMIÈRE PERSONNE (je, mes trades, j'ai fait, etc). respecte STRICTEMENT le profil ci-dessus (minuscules, slang, ego, etc).
 
-donne ton analyse en 5-8 lignes max. sois critique mais constructif. utilise tes expressions favorites. concentre toi sur les patterns récents.
+donne ton analyse en 5-8 lignes max. sois critique envers toi-même mais garde ton ego. utilise tes expressions favorites. concentre toi sur tes patterns récents.
 
 ${tradeSummary}
 
-analyse ces trades et dis ce qui pourrait être amélioré:`,
+analyse tes propres trades et dis ce que TU pourrais améliorer:`,
         },
       ],
     }),
