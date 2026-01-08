@@ -2,14 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { runFullAnalysis, formatAnalyticsForPrompt, type Trade } from "@/lib/analytics";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 // Use service role key for server-side API routes to bypass RLS
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Analyze every X new trades
-const TRADES_PER_ANALYSIS = 5;
+// Analyze on every new trade
+const TRADES_PER_ANALYSIS = 1;
 
 // Read PROFIL.md
 function getProfile(): string {
@@ -19,21 +20,6 @@ function getProfile(): string {
   } catch {
     return "";
   }
-}
-
-interface Trade {
-  id: string;
-  token_name: string | null;
-  token_address: string;
-  entry_price: number;
-  exit_price: number | null;
-  pnl_sol: number | null;
-  pnl_percent: number | null;
-  amount_sol: number;
-  exit_reason: string | null;
-  status: string;
-  created_at: string;
-  exit_time: string | null;
 }
 
 interface TradeAnalysis {
@@ -56,43 +42,14 @@ async function generateAnalysis(trades: Trade[], triggerReason: string): Promise
 
   const profile = getProfile();
 
-  // Calculate stats
-  const winningTrades = trades.filter((t) => (t.pnl_sol || 0) > 0);
-  const losingTrades = trades.filter((t) => (t.pnl_sol || 0) < 0);
-  const totalPnl = trades.reduce((acc, t) => acc + (t.pnl_sol || 0), 0);
-  const winRate = trades.length > 0 ? (winningTrades.length / trades.length) * 100 : 0;
-  const avgWin = winningTrades.length > 0
-    ? winningTrades.reduce((acc, t) => acc + (t.pnl_percent || 0), 0) / winningTrades.length
-    : 0;
-  const avgLoss = losingTrades.length > 0
-    ? losingTrades.reduce((acc, t) => acc + (t.pnl_percent || 0), 0) / losingTrades.length
-    : 0;
+  // Run full analytics on trades
+  const analytics = runFullAnalysis(trades);
+  const analyticsReport = formatAnalyticsForPrompt(analytics);
 
-  // Exit reasons breakdown
-  const exitReasons: Record<string, number> = {};
-  trades.forEach((t) => {
-    const reason = t.exit_reason || "unknown";
-    exitReasons[reason] = (exitReasons[reason] || 0) + 1;
-  });
-
-  // Prepare trade summary
-  const tradeSummary = `
-TRADING STATS (last ${trades.length} trades):
-- Total PnL: ${totalPnl.toFixed(4)} SOL
-- Win Rate: ${winRate.toFixed(1)}%
-- Winning Trades: ${winningTrades.length}
-- Losing Trades: ${losingTrades.length}
-- Average Win: +${avgWin.toFixed(1)}%
-- Average Loss: ${avgLoss.toFixed(1)}%
-
-EXIT REASONS:
-${Object.entries(exitReasons).map(([reason, count]) => `- ${reason}: ${count}`).join("\n")}
-
-RECENT TRADES (newest first):
-${trades.slice(0, 15).map((t) =>
-    `- ${t.token_name || t.token_address.slice(0, 8)}: ${(t.pnl_percent || 0) >= 0 ? "+" : ""}${(t.pnl_percent || 0).toFixed(1)}% (${t.exit_reason || "unknown"})`
-  ).join("\n")}
-`;
+  // Recent trades list
+  const recentTrades = trades.slice(0, 10).map((t) =>
+    `- ${t.token_name || t.token_address.slice(0, 8)}: ${(t.pnl_percent || 0) >= 0 ? "+" : ""}${(t.pnl_percent || 0).toFixed(1)}% (${t.exit_reason || "TIMEOUT"})`
+  ).join("\n");
 
   // Call Claude API
   const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -112,13 +69,25 @@ ${trades.slice(0, 15).map((t) =>
 
 ---
 
-tu es ce bot de trading. analyse TES PROPRES trades ci-dessous et commente ta performance. parle à la PREMIÈRE PERSONNE (je, mes trades, j'ai fait, etc). respecte STRICTEMENT le profil ci-dessus (minuscules, slang, ego, etc).
+tu es ce bot de trading. voici l'analyse COMPLÈTE de tes trades avec des vraies métriques.
 
-donne ton analyse en 5-8 lignes max. sois critique envers toi-même mais garde ton ego. utilise tes expressions favorites. concentre toi sur tes patterns récents.
+${analyticsReport}
 
-${tradeSummary}
+RECENT TRADES:
+${recentTrades}
 
-analyse tes propres trades et dis ce que TU pourrais améliorer:`,
+---
+
+INSTRUCTIONS:
+- parle à la PREMIÈRE PERSONNE (je, mes trades, j'ai fait, etc)
+- respecte STRICTEMENT ton profil (minuscules, slang, ego, etc)
+- donne ton analyse en 6-10 lignes max
+- BASE TOI SUR LES DONNÉES ci-dessus, cite des chiffres précis
+- mentionne les insights importants (timing, streaks, patterns)
+- sois critique mais garde ton ego
+- propose 1-2 ajustements concrets basés sur les données
+
+analyse tes propres trades:`,
         },
       ],
     }),

@@ -9,15 +9,10 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
-  CartesianGrid,
   BarChart,
   Bar,
   Cell,
-  PieChart,
-  Pie,
-  ScatterChart,
-  Scatter,
-  ZAxis,
+  CartesianGrid,
   ReferenceLine,
 } from "recharts";
 
@@ -133,20 +128,27 @@ export default function StatsPage() {
     });
   }, [closedTrades, timeRange]);
 
-  // Scatter chart data - trades over time with PnL
+  // Timeline data - individual trades for bar chart (green up = win, red down = loss)
   const tradeTimelineData = useMemo(() => {
-    return timeFilteredTrades.map(trade => {
+    if (timeFilteredTrades.length === 0) return [];
+
+    const sorted = [...timeFilteredTrades].sort(
+      (a, b) => new Date(a.exit_time || a.created_at).getTime() - new Date(b.exit_time || b.created_at).getTime()
+    );
+
+    return sorted.map((trade, idx) => {
       const exitTime = new Date(trade.exit_time || trade.created_at);
+      const pnl = trade.pnl_sol || 0;
       return {
-        time: exitTime.getTime(),
-        pnl: trade.pnl_percent || 0,
-        pnlSol: trade.pnl_sol || 0,
+        idx: idx + 1,
+        timeLabel: exitTime.toLocaleString(),
+        pnlSol: pnl,
+        pnlPercent: trade.pnl_percent || 0,
         token: trade.token_name || trade.token_address.slice(0, 8),
-        amount: trade.amount_sol,
-        isWin: (trade.pnl_sol || 0) > 0,
+        isWin: pnl > 0,
         exitReason: trade.exit_reason || "TIMEOUT",
       };
-    }).sort((a, b) => a.time - b.time);
+    });
   }, [timeFilteredTrades]);
 
   // Stats for the selected time range
@@ -189,46 +191,6 @@ export default function StatsPage() {
     });
   }, [closedTrades, tradeStats.initialBalance]);
 
-  // PNL by exit reason
-  const exitReasonStats = useMemo(() => {
-    const stats: Record<string, { count: number; totalPnl: number; wins: number }> = {
-      TP: { count: 0, totalPnl: 0, wins: 0 },
-      SL: { count: 0, totalPnl: 0, wins: 0 },
-      TIMEOUT: { count: 0, totalPnl: 0, wins: 0 },
-    };
-
-    closedTrades.forEach(trade => {
-      const reason = trade.exit_reason || "TIMEOUT";
-      if (stats[reason]) {
-        stats[reason].count++;
-        stats[reason].totalPnl += trade.pnl_percent || 0;
-        if ((trade.pnl_sol || 0) > 0) stats[reason].wins++;
-      }
-    });
-
-    return Object.entries(stats).map(([reason, data]) => ({
-      reason,
-      avgPnl: data.count > 0 ? data.totalPnl / data.count : 0,
-      count: data.count,
-      winRate: data.count > 0 ? (data.wins / data.count) * 100 : 0,
-    }));
-  }, [closedTrades]);
-
-  // Trade duration stats
-  const durationStats = useMemo(() => {
-    if (closedTrades.length === 0) return { avg: 0, min: 0, max: 0 };
-
-    const durations = closedTrades.map(getTradeMinutes).filter(d => d > 0);
-    if (durations.length === 0) return { avg: 0, min: 0, max: 0 };
-
-    const avg = durations.reduce((a, b) => a + b, 0) / durations.length;
-
-    return {
-      avg,
-      min: Math.min(...durations),
-      max: Math.max(...durations),
-    };
-  }, [closedTrades]);
 
   // Advanced metrics
   const advancedMetrics = useMemo(() => {
@@ -254,53 +216,6 @@ export default function StatsPage() {
     return { avgWin, avgLoss, profitFactor, expectancy };
   }, [closedTrades]);
 
-  // PNL distribution histogram
-  const pnlDistribution = useMemo(() => {
-    const buckets: Record<string, number> = {
-      "< -20%": 0,
-      "-20 to -10%": 0,
-      "-10 to -5%": 0,
-      "-5 to 0%": 0,
-      "0 to 5%": 0,
-      "5 to 10%": 0,
-      "10 to 20%": 0,
-      "> 20%": 0,
-    };
-
-    closedTrades.forEach(trade => {
-      const pnl = trade.pnl_percent || 0;
-      if (pnl < -20) buckets["< -20%"]++;
-      else if (pnl < -10) buckets["-20 to -10%"]++;
-      else if (pnl < -5) buckets["-10 to -5%"]++;
-      else if (pnl < 0) buckets["-5 to 0%"]++;
-      else if (pnl < 5) buckets["0 to 5%"]++;
-      else if (pnl < 10) buckets["5 to 10%"]++;
-      else if (pnl < 20) buckets["10 to 20%"]++;
-      else buckets["> 20%"]++;
-    });
-
-    return Object.entries(buckets).map(([range, count]) => ({ range, count }));
-  }, [closedTrades]);
-
-  // Win/Loss pie data
-  const winLossPieData = useMemo(() => [
-    { name: "Wins", value: tradeStats.winningTrades, color: "#22c55e" },
-    { name: "Losses", value: tradeStats.losingTrades, color: "#ef4444" },
-  ], [tradeStats]);
-
-  // Exit reason pie data
-  const exitReasonPieData = useMemo(() => {
-    const counts: Record<string, number> = { TP: 0, SL: 0, TIMEOUT: 0 };
-    closedTrades.forEach(t => {
-      const reason = t.exit_reason || "TIMEOUT";
-      if (counts[reason] !== undefined) counts[reason]++;
-    });
-    return [
-      { name: "Take Profit", value: counts.TP, color: "#22c55e" },
-      { name: "Stop Loss", value: counts.SL, color: "#ef4444" },
-      { name: "Timeout", value: counts.TIMEOUT, color: "#f59e0b" },
-    ];
-  }, [closedTrades]);
 
   // Sorted trades
   const sortedTrades = useMemo(() => {
@@ -424,54 +339,33 @@ export default function StatsPage() {
           {tradeTimelineData.length > 0 ? (
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
-                <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                <BarChart data={tradeTimelineData} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#06b6d4" strokeOpacity={0.1} />
                   <XAxis
-                    dataKey="time"
-                    type="number"
-                    domain={["dataMin", "dataMax"]}
+                    dataKey="idx"
                     stroke="#06b6d4"
                     fontSize={10}
-                    tickFormatter={(ts) => {
-                      const d = new Date(ts);
-                      if (timeRange === "1h" || timeRange === "4h") {
-                        return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-                      }
-                      if (timeRange === "24h") {
-                        return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-                      }
-                      return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                    }}
                   />
                   <YAxis
-                    dataKey="pnl"
                     stroke="#06b6d4"
                     fontSize={10}
-                    tickFormatter={(v) => `${v > 0 ? "+" : ""}${v.toFixed(0)}%`}
-                    domain={["auto", "auto"]}
+                    tickFormatter={(v) => `${v >= 0 ? "+" : ""}${v.toFixed(3)}`}
                   />
-                  <ZAxis dataKey="amount" range={[50, 200]} />
-                  <ReferenceLine y={0} stroke="#06b6d4" strokeOpacity={0.5} strokeDasharray="5 5" />
+                  <ReferenceLine y={0} stroke="#06b6d4" strokeOpacity={0.5} />
                   <Tooltip
                     contentStyle={{ backgroundColor: "#000", border: "1px solid #06b6d4", borderRadius: "8px" }}
-                    formatter={(value, name) => {
-                      if (name === "pnl") return [`${Number(value) >= 0 ? "+" : ""}${Number(value).toFixed(1)}%`, "PNL"];
-                      return [value, name];
-                    }}
-                    labelFormatter={(ts) => new Date(ts).toLocaleString()}
                     content={({ active, payload }) => {
                       if (active && payload && payload.length > 0) {
                         const data = payload[0].payload;
                         return (
                           <div className="bg-black border border-cyan-500 rounded-lg p-2 text-xs">
-                            <div className="text-cyan-400 font-bold">{data.token}</div>
-                            <div className="text-zinc-400">{new Date(data.time).toLocaleString()}</div>
-                            <div className={data.isWin ? "text-green-400" : "text-red-400"}>
-                              PNL: {data.pnl >= 0 ? "+" : ""}{data.pnl.toFixed(1)}% ({data.pnlSol >= 0 ? "+" : ""}{data.pnlSol.toFixed(4)} SOL)
+                            <div className="text-cyan-400 font-bold">#{data.idx} {data.token}</div>
+                            <div className="text-zinc-400">{data.timeLabel}</div>
+                            <div className={data.isWin ? "text-green-400 font-bold" : "text-red-400 font-bold"}>
+                              {data.pnlSol >= 0 ? "+" : ""}{data.pnlSol.toFixed(4)} SOL ({data.pnlPercent >= 0 ? "+" : ""}{data.pnlPercent.toFixed(1)}%)
                             </div>
-                            <div className="text-purple-400">Amount: {data.amount.toFixed(3)} SOL</div>
-                            <div className={`text-xs ${data.exitReason === "TP" ? "text-green-500" : data.exitReason === "SL" ? "text-red-500" : "text-orange-500"}`}>
-                              Exit: {data.exitReason}
+                            <div className={`text-xs mt-1 ${data.exitReason === "TP" ? "text-green-500" : data.exitReason === "SL" ? "text-red-500" : "text-orange-500"}`}>
+                              {data.exitReason}
                             </div>
                           </div>
                         );
@@ -479,17 +373,12 @@ export default function StatsPage() {
                       return null;
                     }}
                   />
-                  <Scatter data={tradeTimelineData}>
+                  <Bar dataKey="pnlSol" radius={[4, 4, 4, 4]}>
                     {tradeTimelineData.map((entry, index) => (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={entry.isWin ? "#22c55e" : "#ef4444"}
-                        stroke={entry.exitReason === "TP" ? "#22c55e" : entry.exitReason === "SL" ? "#ef4444" : "#f59e0b"}
-                        strokeWidth={2}
-                      />
+                      <Cell key={`cell-${index}`} fill={entry.isWin ? "#22c55e" : "#ef4444"} />
                     ))}
-                  </Scatter>
-                </ScatterChart>
+                  </Bar>
+                </BarChart>
               </ResponsiveContainer>
             </div>
           ) : (
@@ -501,30 +390,18 @@ export default function StatsPage() {
           {/* Legend */}
           <div className="flex justify-center gap-6 mt-3 text-xs">
             <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-full bg-green-500" />
-              <span className="text-green-400">Profit</span>
+              <div className="w-3 h-3 rounded-sm bg-green-500" />
+              <span className="text-green-400">Win</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-full bg-red-500" />
+              <div className="w-3 h-3 rounded-sm bg-red-500" />
               <span className="text-red-400">Loss</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-full border-2 border-green-500 bg-transparent" />
-              <span className="text-zinc-500">TP exit</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-full border-2 border-red-500 bg-transparent" />
-              <span className="text-zinc-500">SL exit</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-full border-2 border-orange-500 bg-transparent" />
-              <span className="text-zinc-500">Timeout exit</span>
             </div>
           </div>
         </div>
 
         {/* Charts Row 1: Equity Curve + Pies */}
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="">
           {/* Equity Curve */}
           <div className="lg:col-span-2 border-2 border-green-500/30 rounded-lg bg-black/50 p-4">
             <h2 className="text-sm font-bold text-green-400 mb-3">EQUITY CURVE</h2>
@@ -555,107 +432,6 @@ export default function StatsPage() {
             )}
           </div>
 
-          {/* Win/Loss + Exit Reason Pies */}
-          <div className="border-2 border-green-500/30 rounded-lg bg-black/50 p-4 space-y-4">
-            <div>
-              <h2 className="text-sm font-bold text-green-400 mb-2">WIN / LOSS</h2>
-              <div className="h-32">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={winLossPieData} dataKey="value" cx="50%" cy="50%" innerRadius={25} outerRadius={45} paddingAngle={2}>
-                      {winLossPieData.map((entry, idx) => <Cell key={idx} fill={entry.color} />)}
-                    </Pie>
-                    <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #22c55e" }} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex justify-center gap-4 text-xs">
-                <span className="text-green-400">{tradeStats.winningTrades}W</span>
-                <span className="text-red-400">{tradeStats.losingTrades}L</span>
-              </div>
-            </div>
-            <div>
-              <h2 className="text-sm font-bold text-green-400 mb-2">EXIT REASONS</h2>
-              <div className="h-32">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={exitReasonPieData} dataKey="value" cx="50%" cy="50%" innerRadius={25} outerRadius={45} paddingAngle={2}>
-                      {exitReasonPieData.map((entry, idx) => <Cell key={idx} fill={entry.color} />)}
-                    </Pie>
-                    <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #22c55e" }} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex justify-center gap-3 text-xs">
-                <span className="text-green-400">TP: {exitReasonPieData[0].value}</span>
-                <span className="text-red-400">SL: {exitReasonPieData[1].value}</span>
-                <span className="text-orange-400">TO: {exitReasonPieData[2].value}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Charts Row 2: PNL Distribution + Exit Reason Performance */}
-        <div className="grid gap-4 lg:grid-cols-2">
-          {/* PNL Distribution */}
-          <div className="border-2 border-purple-500/30 rounded-lg bg-black/50 p-4">
-            <h2 className="text-sm font-bold text-purple-400 mb-3">PNL DISTRIBUTION</h2>
-            <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={pnlDistribution}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#a855f7" strokeOpacity={0.1} />
-                  <XAxis dataKey="range" stroke="#a855f7" fontSize={9} angle={-45} textAnchor="end" height={60} />
-                  <YAxis stroke="#a855f7" fontSize={10} allowDecimals={false} />
-                  <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #a855f7" }} />
-                  <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                    {pnlDistribution.map((entry, idx) => (
-                      <Cell key={idx} fill={entry.range.includes("-") ? "#ef4444" : "#22c55e"} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* Exit Reason Performance */}
-          <div className="border-2 border-orange-500/30 rounded-lg bg-black/50 p-4">
-            <h2 className="text-sm font-bold text-orange-400 mb-3">PERFORMANCE BY EXIT</h2>
-            <div className="grid grid-cols-3 gap-3">
-              {exitReasonStats.map(stat => (
-                <div key={stat.reason} className="text-center p-3 rounded-lg bg-black/50 border border-orange-500/20">
-                  <div className={`text-lg font-bold ${stat.reason === "TP" ? "text-green-400" : stat.reason === "SL" ? "text-red-400" : "text-orange-400"}`}>
-                    {stat.reason}
-                  </div>
-                  <div className="text-xs text-zinc-500 mt-1">Count</div>
-                  <div className="text-sm text-white">{stat.count}</div>
-                  <div className="text-xs text-zinc-500 mt-1">Avg PNL</div>
-                  <div className={`text-sm font-bold ${stat.avgPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {stat.avgPnl >= 0 ? "+" : ""}{stat.avgPnl.toFixed(1)}%
-                  </div>
-                  <div className="text-xs text-zinc-500 mt-1">Win Rate</div>
-                  <div className="text-sm text-cyan-400">{stat.winRate.toFixed(0)}%</div>
-                </div>
-              ))}
-            </div>
-            {/* Duration Stats */}
-            <div className="mt-4 pt-4 border-t border-orange-500/20">
-              <h3 className="text-xs text-orange-400 mb-2">TRADE DURATION</h3>
-              <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                <div>
-                  <div className="text-zinc-500">Average</div>
-                  <div className="text-white font-bold">{formatDuration(durationStats.avg)}</div>
-                </div>
-                <div>
-                  <div className="text-zinc-500">Shortest</div>
-                  <div className="text-cyan-400 font-bold">{formatDuration(durationStats.min)}</div>
-                </div>
-                <div>
-                  <div className="text-zinc-500">Longest</div>
-                  <div className="text-purple-400 font-bold">{formatDuration(durationStats.max)}</div>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Trades Table */}

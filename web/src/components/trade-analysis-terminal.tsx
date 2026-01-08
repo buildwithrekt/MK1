@@ -123,11 +123,6 @@ export function TradeAnalysisTerminal({ className }: TradeAnalysisTerminalProps)
           </span>
         </div>
         <div className="flex items-center gap-3">
-          {!isLoading && tradesUntilNext > 0 && (
-            <span className="text-yellow-700 text-xs font-mono">
-              {tradesUntilNext} trades until next
-            </span>
-          )}
           {history.length > 0 && (
             <button
               onClick={() => setShowHistory(!showHistory)}
@@ -251,7 +246,7 @@ export function TradeAnalysisTerminal({ className }: TradeAnalysisTerminalProps)
 
       {/* Footer */}
       <div className="px-4 py-1.5 bg-yellow-900/20 border-t border-yellow-500/30 font-mono text-xs text-yellow-600 flex items-center justify-between">
-        <span>powered by claude • auto-refresh every 5 trades</span>
+        <span>powered by claude • auto-refresh on each trade</span>
         <span className={cn(
           "flex items-center gap-1",
           isLoading ? "text-yellow-400" : "text-green-500"

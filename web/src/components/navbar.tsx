@@ -17,6 +17,7 @@ const ASCII_LOGO = `
 const NAV_ITEMS = [
   { href: "/", label: "DASHBOARD" },
   { href: "/stats", label: "STATS" },
+  { href: "/insights", label: "INSIGHTS" },
   { href: "/docs", label: "DOCS" },
 ];
 
