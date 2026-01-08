@@ -5,16 +5,16 @@
     "max_reconnect_attempts": 10
   },
   "monitoring": {
-    "min_initial_market_cap_usd": 3000,
+    "min_initial_market_cap_usd": 4000,
     "monitoring_duration_seconds": 300,
-    "max_tokens_monitored": 100
+    "max_tokens_monitored": 125
   },
   "entry_filters": {
     "dev_must_sell": true,
-    "min_market_cap_usd": 13000,
+    "min_market_cap_usd": 6000,
     "max_market_cap_usd": 45000,
-    "min_buy_volume_usd": 1000,
-    "min_unique_buyers": 5,
+    "min_buy_volume_usd": 5000,
+    "min_unique_buyers": 25,
     "buy_sell_ratio": 1.2
   },
   "birdeye_filters": {
@@ -26,7 +26,7 @@
     "creator_blacklist": []
   },
   "logging": {
-    "new_tokens": false,
+    "new_tokens": true,
     "token_entered_zone": true,
     "momentum_box": true,
     "errors": true

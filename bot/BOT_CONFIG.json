@@ -13,7 +13,7 @@
   },
   "entry_rules": {
     "require_scanner_approval": true,
-    "max_entry_market_cap_usd": 18000
+    "max_entry_market_cap_usd": 30000
   },
   "exit_rules": {
     "stop_loss": {
@@ -28,10 +28,10 @@
     "pre_migration": {
       "enabled": true,
       "market_cap_threshold_usd": 40000,
-      "sell_percent": 50
+      "sell_percent": 100
     },
     "post_migration": {
-      "enabled": true,
+      "enabled": false,
       "sell_percent": 50
     },
     "trailing_stop": {
