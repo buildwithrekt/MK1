@@ -293,7 +293,15 @@ export class DatabaseService {
 
   // ============== LOGS ==============
 
-  async log(type: 'INFO' | 'WARN' | 'ERROR' | 'TRADE', message: string): Promise<void> {
+  private maxLogs = 500;
+
+  setMaxLogs(max: number) {
+    this.maxLogs = max;
+  }
+
+  async log(type: 'INFO' | 'WARN' | 'ERROR' | 'TRADE', message: string, maxLogs?: number): Promise<void> {
+    if (maxLogs) this.maxLogs = maxLogs;
+
     const { error } = await this.supabase.from('bot_logs').insert({
       type,
       message,
@@ -303,7 +311,7 @@ export class DatabaseService {
       // Silently fail
     }
 
-    // Cleanup old logs periodically (keep only 200)
+    // Cleanup old logs periodically
     if (Math.random() < 0.1) {
       await this.cleanupLogs();
     }
@@ -366,6 +374,12 @@ export class DatabaseService {
 
   // ============== PASSED TOKENS ==============
 
+  private maxPassedTokens = 50;
+
+  setMaxPassedTokens(max: number) {
+    this.maxPassedTokens = max;
+  }
+
   async savePassedToken(token: {
     mint: string;
     name?: string;
@@ -413,13 +427,13 @@ export class DatabaseService {
         .from('passed_tokens')
         .select('*', { count: 'exact', head: true });
 
-      if (count && count > 50) {
-        // Get IDs to delete (oldest entries beyond 50)
+      if (count && count > this.maxPassedTokens) {
+        // Get IDs to delete (oldest entries beyond max)
         const { data: oldEntries } = await this.supabase
           .from('passed_tokens')
           .select('id')
           .order('created_at', { ascending: true })
-          .limit(count - 50);
+          .limit(count - this.maxPassedTokens);
 
         if (oldEntries && oldEntries.length > 0) {
           const idsToDelete = oldEntries.map(e => e.id);
@@ -442,12 +456,12 @@ export class DatabaseService {
         .from('bot_logs')
         .select('*', { count: 'exact', head: true });
 
-      if (count && count > 200) {
+      if (count && count > this.maxLogs) {
         const { data: oldEntries } = await this.supabase
           .from('bot_logs')
           .select('id')
           .order('created_at', { ascending: true })
-          .limit(count - 200);
+          .limit(count - this.maxLogs);
 
         if (oldEntries && oldEntries.length > 0) {
           await this.supabase
@@ -459,6 +473,155 @@ export class DatabaseService {
     } catch {
       // Silently fail
     }
+  }
+
+  // ============== MONITORED TOKENS ==============
+
+  async upsertMonitoredToken(token: {
+    mint: string;
+    name?: string;
+    symbol?: string;
+    imageUri?: string;
+    creator?: string;
+    bondingCurve?: string;
+    marketCapSol?: number;
+    marketCapUsd?: number;
+    totalBuyVolumeSol?: number;
+    totalSellVolumeSol?: number;
+    buyVolumeUsd?: number;
+    uniqueBuyers?: number;
+    buySellRatio?: number;
+    devSold?: boolean;
+    mcOk?: boolean;
+    volOk?: boolean;
+    buyersOk?: boolean;
+    ratioOk?: boolean;
+    allFiltersPassed?: boolean;
+    expiresAt?: Date;
+  }): Promise<void> {
+    const { error } = await this.supabase.from('monitored_tokens').upsert({
+      mint: token.mint,
+      name: token.name,
+      symbol: token.symbol,
+      image_uri: token.imageUri,
+      creator: token.creator,
+      bonding_curve: token.bondingCurve,
+      market_cap_sol: token.marketCapSol,
+      market_cap_usd: token.marketCapUsd,
+      total_buy_volume_sol: token.totalBuyVolumeSol,
+      total_sell_volume_sol: token.totalSellVolumeSol,
+      buy_volume_usd: token.buyVolumeUsd,
+      unique_buyers: token.uniqueBuyers,
+      buy_sell_ratio: token.buySellRatio,
+      dev_sold: token.devSold,
+      mc_ok: token.mcOk,
+      vol_ok: token.volOk,
+      buyers_ok: token.buyersOk,
+      ratio_ok: token.ratioOk,
+      all_filters_passed: token.allFiltersPassed,
+      expires_at: token.expiresAt?.toISOString(),
+      last_updated_at: new Date().toISOString(),
+    }, { onConflict: 'mint' });
+
+    if (error) {
+      // Silently fail - don't spam logs
+    }
+  }
+
+  async bulkUpsertMonitoredTokens(tokens: Array<{
+    mint: string;
+    name?: string;
+    symbol?: string;
+    imageUri?: string;
+    creator?: string;
+    bondingCurve?: string;
+    marketCapSol?: number;
+    marketCapUsd?: number;
+    totalBuyVolumeSol?: number;
+    totalSellVolumeSol?: number;
+    buyVolumeUsd?: number;
+    uniqueBuyers?: number;
+    buySellRatio?: number;
+    devSold?: boolean;
+    mcOk?: boolean;
+    volOk?: boolean;
+    buyersOk?: boolean;
+    ratioOk?: boolean;
+    allFiltersPassed?: boolean;
+    expiresAt?: Date;
+  }>): Promise<void> {
+    if (tokens.length === 0) return;
+
+    const records = tokens.map(token => ({
+      mint: token.mint,
+      name: token.name,
+      symbol: token.symbol,
+      image_uri: token.imageUri,
+      creator: token.creator,
+      bonding_curve: token.bondingCurve,
+      market_cap_sol: token.marketCapSol,
+      market_cap_usd: token.marketCapUsd,
+      total_buy_volume_sol: token.totalBuyVolumeSol,
+      total_sell_volume_sol: token.totalSellVolumeSol,
+      buy_volume_usd: token.buyVolumeUsd,
+      unique_buyers: token.uniqueBuyers,
+      buy_sell_ratio: token.buySellRatio,
+      dev_sold: token.devSold,
+      mc_ok: token.mcOk,
+      vol_ok: token.volOk,
+      buyers_ok: token.buyersOk,
+      ratio_ok: token.ratioOk,
+      all_filters_passed: token.allFiltersPassed,
+      expires_at: token.expiresAt?.toISOString(),
+      last_updated_at: new Date().toISOString(),
+    }));
+
+    const { error } = await this.supabase
+      .from('monitored_tokens')
+      .upsert(records, { onConflict: 'mint' });
+
+    if (error) {
+      console.error('❌ Failed to bulk upsert monitored tokens:', error.message);
+    }
+  }
+
+  async deleteMonitoredToken(mint: string): Promise<void> {
+    await this.supabase.from('monitored_tokens').delete().eq('mint', mint);
+  }
+
+  async deleteExpiredMonitoredTokens(): Promise<void> {
+    await this.supabase
+      .from('monitored_tokens')
+      .delete()
+      .lt('expires_at', new Date().toISOString());
+  }
+
+  async clearAllMonitoredTokens(): Promise<void> {
+    await this.supabase.from('monitored_tokens').delete().neq('mint', '');
+  }
+
+  async getMonitoredTokens(): Promise<Array<{
+    mint: string;
+    name: string;
+    symbol: string;
+    image_uri: string;
+    market_cap_usd: number;
+    buy_volume_usd: number;
+    unique_buyers: number;
+    buy_sell_ratio: number;
+    dev_sold: boolean;
+    all_filters_passed: boolean;
+    last_updated_at: string;
+  }>> {
+    const { data, error } = await this.supabase
+      .from('monitored_tokens')
+      .select('*')
+      .order('all_filters_passed', { ascending: false })
+      .order('buy_volume_usd', { ascending: false })
+      .limit(50);
+
+    if (error) return [];
+    return data || [];
   }
 }
 

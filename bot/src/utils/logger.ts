@@ -14,6 +14,19 @@ export interface DatabaseLoggingConfig {
   max_logs: number;
 }
 
+export interface BotLoggingConfig {
+  trades: boolean;
+  position_updates: boolean;
+  pnl: boolean;
+  errors: boolean;
+}
+
+export interface BotTerminalConfig {
+  show_trades: boolean;
+  show_positions: boolean;
+  show_pnl: boolean;
+}
+
 class Logger {
   private dbEnabled = false;
   private loggingConfig: LoggingConfig = {
