@@ -2,11 +2,49 @@ import { getDatabase } from '../services/database.js';
 
 export type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'TRADE';
 
+export interface LoggingConfig {
+  new_tokens: boolean;
+  token_entered_zone: boolean;
+  momentum_box: boolean;
+  errors: boolean;
+}
+
+export interface DatabaseLoggingConfig {
+  save_logs: boolean;
+  max_logs: number;
+}
+
 class Logger {
   private dbEnabled = false;
+  private loggingConfig: LoggingConfig = {
+    new_tokens: false,
+    token_entered_zone: true,
+    momentum_box: true,
+    errors: true,
+  };
+  private dbLoggingConfig: DatabaseLoggingConfig = {
+    save_logs: true,
+    max_logs: 500,
+  };
 
   enableDatabase() {
     this.dbEnabled = true;
+  }
+
+  setLoggingConfig(config: LoggingConfig) {
+    this.loggingConfig = config;
+  }
+
+  setDbLoggingConfig(config: DatabaseLoggingConfig) {
+    this.dbLoggingConfig = config;
+  }
+
+  getLoggingConfig(): LoggingConfig {
+    return this.loggingConfig;
+  }
+
+  getDbLoggingConfig(): DatabaseLoggingConfig {
+    return this.dbLoggingConfig;
   }
 
   private formatTime(): string {
@@ -45,15 +83,18 @@ class Logger {
     // Clean console output
     console.log(`${color}${time} ${prefix} ${message}${reset}`);
 
-    // Log to database (TRADE + important WARN/ERROR)
+    // Log to database (only if save_logs is enabled)
+    if (!this.dbLoggingConfig.save_logs) return;
+
+    // TRADE + important WARN/ERROR
     const shouldSaveToDb = level === 'TRADE' ||
       (level === 'WARN' && (message.includes('timeout') || message.includes('stale'))) ||
-      level === 'ERROR';
+      (level === 'ERROR' && this.loggingConfig.errors);
 
     if (this.dbEnabled && shouldSaveToDb) {
       try {
         const db = getDatabase();
-        await db.log(level, message);
+        await db.log(level, message, this.dbLoggingConfig.max_logs);
       } catch {
         // Silently fail
       }

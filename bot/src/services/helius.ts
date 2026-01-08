@@ -15,13 +15,18 @@ export interface HeliusEvents {
   error: (error: Error) => void;
 }
 
+export interface HeliusConfig {
+  reconnectDelayMs?: number;
+  maxReconnectAttempts?: number;
+}
+
 export class HeliusService extends EventEmitter {
   private ws: WebSocket | null = null;
   private rpc: Connection;
   private wsUrl: string;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
-  private reconnectDelay = 1000;
+  private maxReconnectAttempts: number;
+  private reconnectDelay: number;
   private subscriptionId = 0;
   private isConnected = false;
 
@@ -31,10 +36,12 @@ export class HeliusService extends EventEmitter {
   // Track subscribed tokens (for position monitoring)
   private subscribedTokens: Set<string> = new Set();
 
-  constructor(rpcUrl: string, wsUrl: string) {
+  constructor(rpcUrl: string, wsUrl: string, config?: HeliusConfig) {
     super();
     this.rpc = new Connection(rpcUrl, 'confirmed');
     this.wsUrl = wsUrl;
+    this.reconnectDelay = config?.reconnectDelayMs ?? 1000;
+    this.maxReconnectAttempts = config?.maxReconnectAttempts ?? 10;
   }
 
   async connect(): Promise<void> {

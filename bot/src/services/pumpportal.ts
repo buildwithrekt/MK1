@@ -49,19 +49,26 @@ export interface PumpPortalEvents {
   error: (error: Error) => void;
 }
 
+export interface PumpPortalConfig {
+  reconnectDelayMs?: number;
+  maxReconnectAttempts?: number;
+}
+
 export class PumpPortalService extends EventEmitter {
   private ws: WebSocket | null = null;
   private wsUrl: string;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
-  private reconnectDelay = 1000;
+  private maxReconnectAttempts: number;
+  private reconnectDelay: number;
   private isConnected = false;
   private subscribedTokens: Set<string> = new Set();
   private subscribedAccounts: Set<string> = new Set();
 
-  constructor(wsUrl: string = 'wss://pumpportal.fun/api/data') {
+  constructor(wsUrl: string = 'wss://pumpportal.fun/api/data', config?: PumpPortalConfig) {
     super();
     this.wsUrl = wsUrl;
+    this.reconnectDelay = config?.reconnectDelayMs ?? 1000;
+    this.maxReconnectAttempts = config?.maxReconnectAttempts ?? 10;
   }
 
   async connect(): Promise<void> {
