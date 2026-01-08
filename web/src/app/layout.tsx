@@ -9,20 +9,23 @@ const inter = Inter({ subsets: ["latin"] });
 const siteUrl = process.env.NEXT_PUBLIC_WEBSITE_URL || "https://www.mk1mf.com";
 
 export const metadata: Metadata = {
-  title: "mk1 advanced trading bot",
+  title: {
+    default: "MK1 | Autonomous Trading Bot",
+    template: "%s",
+  },
   description: "autonomous trading bot for memecoins on Solana",
   metadataBase: new URL(siteUrl),
   openGraph: {
-    title: "mk1 advanced trading bot",
+    title: "MK1 | Autonomous Trading Bot",
     description: "autonomous trading bot for memecoins on Solana",
     url: siteUrl,
-    siteName: "mk1",
+    siteName: "MK1",
     images: [
       {
         url: "/assets/seo_banner.jpg",
         width: 1200,
         height: 630,
-        alt: "mk1 trading bot",
+        alt: "MK1 trading bot",
       },
     ],
     locale: "en_US",
@@ -30,7 +33,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "mk1 advanced trading bot",
+    title: "MK1 | Autonomous Trading Bot",
     description: "autonomous trading bot for memecoins on Solana",
     images: ["/assets/seo_banner.jpg"],
   },

@@ -1,7 +1,7 @@
 export default function DocsPage() {
   return (
     <main>
-      <div className="max-w-4xl mx-auto px-4 py-8 space-y-8">
+      <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
         {/* What is MK1 */}
         <section className="border-2 border-green-500/30 rounded-lg p-6 bg-black/50">
           <h2 className="text-xl font-bold text-green-400 mb-4 flex items-center gap-2">

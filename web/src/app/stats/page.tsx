@@ -282,8 +282,8 @@ export default function StatsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-black text-green-400 p-6 font-mono">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <main>
+      <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
         {/* Header */}
         <div className="border-b-2 border-green-500/30 pb-4">
           <h1 className="text-3xl font-bold text-green-400 drop-shadow-[0_0_10px_rgba(34,197,94,0.5)]">

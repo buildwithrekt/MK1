@@ -159,8 +159,8 @@ export default function InsightsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-black text-green-400 p-6 font-mono">
-      <div className="max-w-4xl mx-auto space-y-6">
+    <main>
+      <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
         {/* Header */}
         <div className="border-b-2 border-green-500/30 pb-4 flex items-center justify-between">
           <div>
