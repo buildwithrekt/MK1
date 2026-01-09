@@ -14,8 +14,8 @@ import { CONFIG_POLL_INTERVAL, PRICE_CHECK_INTERVAL } from './constants.js';
 import { fetchAndValidateToken, fetchTokenLogo } from './services/birdeye.js';
 import type { BotConfig, ExitRules } from './types/index.js';
 
-// Prompt user for confirmation
-async function askConfirmation(question: string): Promise<boolean> {
+// Prompt user for input
+async function askQuestion(question: string): Promise<string> {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -24,13 +24,7 @@ async function askConfirmation(question: string): Promise<boolean> {
   return new Promise((resolve) => {
     rl.question(question, (answer) => {
       rl.close();
-      const confirmed = answer.toLowerCase() === 'yes' || answer.toLowerCase() === 'y';
-      if (!confirmed) {
-        console.log('');
-        console.log('❌ Cancelled. Exiting...');
-        process.exit(0);
-      }
-      resolve(true);
+      resolve(answer.toLowerCase().trim());
     });
   });
 }
@@ -194,29 +188,52 @@ async function main() {
       console.log(`║  Wallet Balance:     ${walletBalance.toFixed(4)} SOL`.padEnd(66) + '║');
       console.log(`║  Open Positions:     ${summary.openPositions}`.padEnd(66) + '║');
       console.log('╠═══════════════════════════════════════════════════════════════╣');
-      console.log('║  CURRENT STATS (will be reset):'.padEnd(66) + '║');
+      console.log('║  CURRENT STATS:'.padEnd(66) + '║');
+      console.log(`║    Started with:     ${summary.currentBalance > 0 ? (summary.currentBalance - summary.totalPnl).toFixed(4) : walletBalance.toFixed(4)} SOL`.padEnd(66) + '║');
       console.log(`║    Total Trades:     ${summary.totalTrades}`.padEnd(66) + '║');
       console.log(`║    Total PnL:        ${summary.totalPnl >= 0 ? '+' : ''}${summary.totalPnl.toFixed(4)} SOL`.padEnd(66) + '║');
       console.log(`║    Win Rate:         ${summary.winRate.toFixed(1)}%`.padEnd(66) + '║');
       console.log('╠═══════════════════════════════════════════════════════════════╣');
-      console.log('║  ⚠️  This will:'.padEnd(66) + '║');
-      console.log('║    - Close all open positions in database'.padEnd(66) + '║');
-      console.log('║    - Reset PnL to 0'.padEnd(66) + '║');
-      console.log(`║    - Set initial balance to ${walletBalance.toFixed(4)} SOL`.padEnd(66) + '║');
+      console.log('║  OPTIONS:'.padEnd(66) + '║');
+      console.log('║    [C] CONTINUE - Keep stats, start trading'.padEnd(66) + '║');
+      console.log('║    [R] RESET    - Reset all stats to 0, new balance'.padEnd(66) + '║');
+      console.log('║    [X] EXIT     - Cancel and quit'.padEnd(66) + '║');
       console.log('╚═══════════════════════════════════════════════════════════════╝');
       console.log('');
 
-      await askConfirmation('Do you want to continue? (yes/no): ');
+      const choice = await askQuestion('Your choice (C/R/X): ');
+
+      if (choice === 'x' || choice === 'exit' || choice === 'quit') {
+        console.log('');
+        console.log('❌ Cancelled. Exiting...');
+        process.exit(0);
+      }
+
+      if (choice === 'r' || choice === 'reset') {
+        console.log('');
+        console.log('🔄 Resetting all stats...');
+        await db.fullReset(mode, walletBalance);
+        console.log(`✅ Stats reset! New balance: ${walletBalance.toFixed(4)} SOL`);
+      } else {
+        // Default to continue (C or any other input)
+        console.log('');
+        console.log('✅ Continuing with current stats...');
+
+        // Still close any orphaned open positions in DB
+        if (summary.openPositions > 0) {
+          console.log(`⚠️  Closing ${summary.openPositions} orphaned position(s) in database...`);
+          await db.closeAllOpenTrades(false);
+        }
+      }
 
       console.log('');
-      console.log('✅ Confirmed! Resetting stats and starting bot...');
-
-      // Full reset: close open trades and reset stats
-      await db.fullReset(mode, walletBalance);
 
     } catch (error) {
       console.error('⚠️  Failed to fetch wallet balance:', (error as Error).message);
-      await askConfirmation('Continue anyway? (yes/no): ');
+      const choice = await askQuestion('Continue anyway? (y/n): ');
+      if (choice !== 'y' && choice !== 'yes') {
+        process.exit(0);
+      }
     }
   }
 
