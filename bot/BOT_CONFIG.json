@@ -69,6 +69,7 @@
   },
   "mode": {
     "dry_run": true,
-    "is_running": true
+    "is_running": true,
+    "close_positions_on_startup": true
   }
 }

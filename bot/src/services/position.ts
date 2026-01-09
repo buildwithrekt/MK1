@@ -567,4 +567,28 @@ export class PositionManager extends EventEmitter {
       this.priceCheckInterval = null;
     }
   }
+
+  // Close all open positions (for startup safety in LIVE mode)
+  async closeAllPositions(reason: ExitReason = 'MANUAL'): Promise<number> {
+    const positions = Array.from(this.positions.values());
+    if (positions.length === 0) {
+      return 0;
+    }
+
+    logger.warn(`🚨 Closing ALL ${positions.length} open position(s) on startup...`);
+    let closedCount = 0;
+
+    for (const position of positions) {
+      try {
+        logger.info(`  Closing ${position.tokenName}...`);
+        await this.closePosition(position.mint, reason);
+        closedCount++;
+      } catch (error) {
+        logger.error(`  Failed to close ${position.tokenName}: ${(error as Error).message}`);
+      }
+    }
+
+    logger.warn(`✅ Closed ${closedCount}/${positions.length} positions`);
+    return closedCount;
+  }
 }

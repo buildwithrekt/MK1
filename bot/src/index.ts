@@ -762,12 +762,21 @@ async function main() {
     // Restore any open positions from database (survives restarts)
     const restoredCount = await positionManager.loadOpenPositions();
     if (restoredCount > 0) {
-      logger.info(`Restored ${restoredCount} position(s) - will continue monitoring`);
-      // Subscribe to price updates for restored positions
-      const restoredMints = positionManager.getOpenPositions().map(p => p.mint);
-      if (restoredMints.length > 0) {
-        pumpPortal.subscribeTokenTrades(restoredMints);
-        logger.info(`Subscribed to trades for ${restoredMints.length} restored position(s)`);
+      logger.info(`Restored ${restoredCount} position(s) from database`);
+
+      // SAFETY: In LIVE mode with close_positions_on_startup enabled, sell all positions immediately
+      const closeOnStartup = jsonConfig.mode.close_positions_on_startup ?? true;
+      if (!isDryRun && closeOnStartup) {
+        logger.warn('⚠️  LIVE MODE: Closing all positions on startup for safety...');
+        const closedCount = await positionManager.closeAllPositions('MANUAL');
+        logger.info(`Closed ${closedCount} position(s) on startup`);
+      } else {
+        // Subscribe to price updates for restored positions
+        const restoredMints = positionManager.getOpenPositions().map(p => p.mint);
+        if (restoredMints.length > 0) {
+          pumpPortal.subscribeTokenTrades(restoredMints);
+          logger.info(`Subscribed to trades for ${restoredMints.length} restored position(s)`);
+        }
       }
     }
 

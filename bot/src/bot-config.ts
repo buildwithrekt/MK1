@@ -45,6 +45,7 @@ export interface BotJsonConfig {
   mode: {
     dry_run: boolean;
     is_running: boolean;
+    close_positions_on_startup: boolean; // Sell all open positions when bot starts (safety for LIVE)
   };
 }
 
@@ -106,6 +107,7 @@ export function loadBotConfig(): BotJsonConfig {
       mode: {
         dry_run: true,
         is_running: true,
+        close_positions_on_startup: true, // Default: sell all on startup for safety
       },
     };
   }
