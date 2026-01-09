@@ -7,6 +7,7 @@ export function PaperTradingBubble() {
   const [stats, setStats] = React.useState<BotStats | null>(null);
   const [openPositions, setOpenPositions] = React.useState(0);
   const [isExpanded, setIsExpanded] = React.useState(true);
+  const [isDryRun, setIsDryRun] = React.useState(true);
   const errorCountRef = React.useRef(0);
   const lastFetchRef = React.useRef(0);
 
@@ -17,10 +18,22 @@ export function PaperTradingBubble() {
     lastFetchRef.current = now;
 
     try {
+      // First fetch mode from bot_config
+      const { data: configData } = await supabase
+        .from("bot_config")
+        .select("dry_run")
+        .limit(1)
+        .maybeSingle();
+
+      const dryRun = configData?.dry_run ?? true;
+      setIsDryRun(dryRun);
+
+      const mode = dryRun ? "paper" : "live";
+
       const { data: statsData, error } = await supabase
         .from("bot_stats")
         .select("*")
-        .eq("mode", "paper")
+        .eq("mode", mode)
         .maybeSingle();
 
       if (statsData && !error) {
@@ -34,7 +47,7 @@ export function PaperTradingBubble() {
       const { count } = await supabase
         .from("trades")
         .select("*", { count: "exact", head: true })
-        .eq("dry_run", true)
+        .eq("dry_run", dryRun)
         .eq("status", "OPEN");
 
       setOpenPositions(count || 0);
@@ -95,13 +108,19 @@ export function PaperTradingBubble() {
   const pnl = displayStats.total_pnl_sol;
   const pnlPercent = displayStats.total_pnl_percent.toFixed(1);
 
+  const modeColor = isDryRun ? "yellow" : "green";
+  const modeLabel = isDryRun ? "PAPER MODE" : "LIVE MODE";
+
   return (
     <div className="fixed bottom-4 right-4 z-50">
       <div
         className={`
-          bg-black/95 border-2 border-yellow-500/70 rounded-lg
-          shadow-[0_0_20px_rgba(234,179,8,0.3)]
+          bg-black/95 border-2 rounded-lg
           transition-all duration-300 ease-in-out
+          ${isDryRun
+            ? "border-yellow-500/70 shadow-[0_0_20px_rgba(234,179,8,0.3)]"
+            : "border-green-500/70 shadow-[0_0_20px_rgba(34,197,94,0.3)]"
+          }
           ${isExpanded ? "p-4" : "p-2"}
         `}
       >
@@ -110,11 +129,17 @@ export function PaperTradingBubble() {
           className="flex items-center gap-3 cursor-pointer"
           onClick={() => setIsExpanded(!isExpanded)}
         >
-          <div className="w-3 h-3 rounded-full bg-yellow-500 animate-pulse shadow-[0_0_10px_rgba(234,179,8,0.8)]" />
-          <span className="text-yellow-400 font-mono text-sm font-bold tracking-wider">
-            PAPER MODE
+          <div className={`w-3 h-3 rounded-full animate-pulse ${
+            isDryRun
+              ? "bg-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.8)]"
+              : "bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]"
+          }`} />
+          <span className={`font-mono text-sm font-bold tracking-wider ${
+            isDryRun ? "text-yellow-400" : "text-green-400"
+          }`}>
+            {modeLabel}
           </span>
-          <span className="text-yellow-600 text-xs">
+          <span className={`text-xs ${isDryRun ? "text-yellow-600" : "text-green-600"}`}>
             {isExpanded ? "▼" : "▲"}
           </span>
         </div>
@@ -125,7 +150,11 @@ export function PaperTradingBubble() {
             {/* Balance */}
             <div className="flex items-center justify-between gap-6">
               <span className="text-zinc-500 text-xs">BALANCE</span>
-              <span className="text-yellow-400 text-lg font-bold drop-shadow-[0_0_8px_rgba(234,179,8,0.5)]">
+              <span className={`text-lg font-bold ${
+                isDryRun
+                  ? "text-yellow-400 drop-shadow-[0_0_8px_rgba(234,179,8,0.5)]"
+                  : "text-green-400 drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]"
+              }`}>
                 {displayStats.current_balance.toFixed(4)} SOL
               </span>
             </div>
@@ -153,7 +182,7 @@ export function PaperTradingBubble() {
             </div>
 
             {/* Divider */}
-            <div className="border-t border-yellow-500/30 my-2" />
+            <div className={`border-t my-2 ${isDryRun ? "border-yellow-500/30" : "border-green-500/30"}`} />
 
             {/* Stats row */}
             <div className="flex items-center justify-between text-xs">
