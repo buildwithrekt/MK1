@@ -150,9 +150,9 @@ async function main() {
     jsonConfig.trading.use_jito || false
   );
 
-  // Save wallet address to database for dashboard
+  // Initialize bot config in database (creates row if not exists, updates if exists)
   if (db) {
-    await db.updateWalletAddress(envConfig.walletPublicKey);
+    await db.initializeBotConfig(envConfig.walletPublicKey, isDryRun);
   }
 
   // Initialize live balance from wallet if in live mode

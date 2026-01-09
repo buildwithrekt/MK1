@@ -205,6 +205,48 @@ export class DatabaseService {
 
   // ============== CONFIG ==============
 
+  async initializeBotConfig(walletAddress: string, isDryRun: boolean): Promise<void> {
+    // Check if config exists
+    const { data: existing } = await this.supabase
+      .from('bot_config')
+      .select('id')
+      .limit(1)
+      .maybeSingle();
+
+    if (existing) {
+      // Update existing config with wallet address
+      const { error } = await this.supabase
+        .from('bot_config')
+        .update({
+          wallet_address: walletAddress,
+          dry_run: isDryRun,
+          is_running: true,
+        })
+        .eq('id', existing.id);
+
+      if (error) {
+        console.error('Failed to update bot_config:', error);
+      } else {
+        console.log(`✅ Bot config updated (wallet: ${walletAddress.slice(0, 8)}...)`);
+      }
+    } else {
+      // Create new config
+      const { error } = await this.supabase
+        .from('bot_config')
+        .insert({
+          wallet_address: walletAddress,
+          is_running: true,
+          dry_run: isDryRun,
+        });
+
+      if (error) {
+        console.error('Failed to create bot_config:', error);
+      } else {
+        console.log(`✅ Bot config created (wallet: ${walletAddress.slice(0, 8)}...)`);
+      }
+    }
+  }
+
   async getConfig(): Promise<BotConfig> {
     const { data, error } = await this.supabase
       .from('bot_config')
