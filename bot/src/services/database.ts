@@ -593,6 +593,9 @@ export class DatabaseService {
     const balance = initialBalance ?? (process.env.STARTING_BALANCE_SOL
       ? parseFloat(process.env.STARTING_BALANCE_SOL)
       : 10);
+
+    console.log(`🔄 Resetting ${mode} stats: balance=${balance.toFixed(4)} SOL`);
+
     const { error } = await this.supabase
       .from('bot_stats')
       .update({
@@ -609,11 +612,14 @@ export class DatabaseService {
         total_volume_sol: 0,
         avg_trade_pnl_percent: 0,
         last_trade_at: null,
+        updated_at: new Date().toISOString(),
       })
       .eq('mode', mode);
 
     if (error) {
-      console.error('Failed to reset bot stats:', error);
+      console.error('❌ Failed to reset bot stats:', error);
+    } else {
+      console.log(`✅ ${mode} stats reset complete`);
     }
   }
 
