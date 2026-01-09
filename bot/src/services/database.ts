@@ -275,6 +275,21 @@ export class DatabaseService {
     return this.getFullConfig();
   }
 
+  async updateWalletAddress(walletAddress: string): Promise<void> {
+    const current = await this.getConfig();
+
+    const { error } = await this.supabase
+      .from('bot_config')
+      .update({ wallet_address: walletAddress })
+      .eq('id', current.id);
+
+    if (error) {
+      console.error('Failed to update wallet address:', error);
+    } else {
+      console.log(`✅ Wallet address saved: ${walletAddress}`);
+    }
+  }
+
   // ============== LOGS ==============
 
   private maxLogs = 500;

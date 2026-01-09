@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { createClient } from "@supabase/supabase-js";
 
 interface BotConfig {
   strategy?: string;
@@ -93,8 +94,31 @@ export async function GET() {
   const botConfig = loadBotConfig();
   const scanConfig = loadScanConfig();
 
+  // Fetch wallet address from Supabase bot_config
+  let walletPublicKey = process.env.WALLET_PUBLIC_KEY || "";
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (supabaseUrl && supabaseKey) {
+    try {
+      const supabase = createClient(supabaseUrl, supabaseKey);
+      const { data } = await supabase
+        .from("bot_config")
+        .select("wallet_address")
+        .limit(1)
+        .single();
+
+      if (data?.wallet_address) {
+        walletPublicKey = data.wallet_address;
+      }
+    } catch {
+      // Fallback to env var
+    }
+  }
+
   return NextResponse.json({
-    walletPublicKey: process.env.WALLET_PUBLIC_KEY || "",
+    walletPublicKey,
     rpcUrl: process.env.RPC_URL ? "configured" : "not configured",
     startingBalanceSol: process.env.STARTING_BALANCE_SOL
       ? parseFloat(process.env.STARTING_BALANCE_SOL)

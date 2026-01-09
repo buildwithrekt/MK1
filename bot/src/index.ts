@@ -150,6 +150,11 @@ async function main() {
     jsonConfig.trading.use_jito || false
   );
 
+  // Save wallet address to database for dashboard
+  if (db) {
+    await db.updateWalletAddress(envConfig.walletPublicKey);
+  }
+
   // Initialize live balance from wallet if in live mode
   if (!isDryRun && db) {
     try {
