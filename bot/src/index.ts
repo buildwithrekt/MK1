@@ -24,7 +24,13 @@ async function askConfirmation(question: string): Promise<boolean> {
   return new Promise((resolve) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve(answer.toLowerCase() === 'yes' || answer.toLowerCase() === 'y');
+      const confirmed = answer.toLowerCase() === 'yes' || answer.toLowerCase() === 'y';
+      if (!confirmed) {
+        console.log('');
+        console.log('❌ Cancelled. Exiting...');
+        process.exit(0);
+      }
+      resolve(true);
     });
   });
 }
@@ -200,13 +206,7 @@ async function main() {
       console.log('╚═══════════════════════════════════════════════════════════════╝');
       console.log('');
 
-      const confirmed = await askConfirmation('Do you want to continue? (yes/no): ');
-
-      if (!confirmed) {
-        console.log('');
-        console.log('❌ Startup cancelled by user.');
-        process.exit(0);
-      }
+      await askConfirmation('Do you want to continue? (yes/no): ');
 
       console.log('');
       console.log('✅ Confirmed! Resetting stats and starting bot...');
@@ -216,10 +216,7 @@ async function main() {
 
     } catch (error) {
       console.error('⚠️  Failed to fetch wallet balance:', (error as Error).message);
-      const confirmed = await askConfirmation('Continue anyway? (yes/no): ');
-      if (!confirmed) {
-        process.exit(0);
-      }
+      await askConfirmation('Continue anyway? (yes/no): ');
     }
   }
 
