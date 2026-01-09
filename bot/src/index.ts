@@ -1,5 +1,4 @@
 import 'dotenv/config';
-import * as readline from 'readline';
 import { loadEnvConfig, validateConfig } from './config.js';
 import { loadBotConfig } from './bot-config.js';
 import { loadScanConfig } from './scan-config.js';
@@ -14,20 +13,10 @@ import { CONFIG_POLL_INTERVAL, PRICE_CHECK_INTERVAL } from './constants.js';
 import { fetchAndValidateToken, fetchTokenLogo } from './services/birdeye.js';
 import type { BotConfig, ExitRules } from './types/index.js';
 
-// Prompt user for input
-async function askQuestion(question: string): Promise<string> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.toLowerCase().trim());
-    });
-  });
-}
+// Parse command line arguments
+const args = process.argv.slice(2);
+const RESET_MODE = args.includes('--reset') || args.includes('-r');
+const STATUS_ONLY = args.includes('--status') || args.includes('-s');
 
 // Global error handlers for production stability
 process.on('uncaughtException', (error) => {
@@ -172,7 +161,10 @@ async function main() {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // LIVE MODE CONFIRMATION - Show status and ask for confirmation before starting
+  // LIVE MODE STARTUP - Show status and handle reset/continue via command line args
+  // Usage: npm run dev -- --reset  (to reset stats)
+  //        npm run dev -- --status (to show stats and exit)
+  //        npm run dev            (to continue with current stats)
   // ═══════════════════════════════════════════════════════════════════════════
   let walletBalance = 0;
   if (!isDryRun && db) {
@@ -193,33 +185,28 @@ async function main() {
       console.log(`║    Total Trades:     ${summary.totalTrades}`.padEnd(66) + '║');
       console.log(`║    Total PnL:        ${summary.totalPnl >= 0 ? '+' : ''}${summary.totalPnl.toFixed(4)} SOL`.padEnd(66) + '║');
       console.log(`║    Win Rate:         ${summary.winRate.toFixed(1)}%`.padEnd(66) + '║');
-      console.log('╠═══════════════════════════════════════════════════════════════╣');
-      console.log('║  OPTIONS:'.padEnd(66) + '║');
-      console.log('║    [C] CONTINUE - Keep stats, start trading'.padEnd(66) + '║');
-      console.log('║    [R] RESET    - Reset all stats to 0, new balance'.padEnd(66) + '║');
-      console.log('║    [X] EXIT     - Cancel and quit'.padEnd(66) + '║');
       console.log('╚═══════════════════════════════════════════════════════════════╝');
-      console.log('');
 
-      const choice = await askQuestion('Your choice (C/R/X): ');
-
-      if (choice === 'x' || choice === 'exit' || choice === 'quit') {
+      // Status only mode - just show stats and exit
+      if (STATUS_ONLY) {
         console.log('');
-        console.log('❌ Cancelled. Exiting...');
+        console.log('📊 Status displayed. Exiting...');
         process.exit(0);
       }
 
-      if (choice === 'r' || choice === 'reset') {
+      // Reset mode - reset all stats
+      if (RESET_MODE) {
         console.log('');
-        console.log('🔄 Resetting all stats...');
+        console.log('🔄 RESET MODE: Resetting all stats...');
         await db.fullReset(mode, walletBalance);
         console.log(`✅ Stats reset! New balance: ${walletBalance.toFixed(4)} SOL`);
       } else {
-        // Default to continue (C or any other input)
+        // Default: continue with current stats
         console.log('');
         console.log('✅ Continuing with current stats...');
+        console.log('   (Use --reset flag to reset: npm run dev -- --reset)');
 
-        // Still close any orphaned open positions in DB
+        // Close any orphaned open positions in DB
         if (summary.openPositions > 0) {
           console.log(`⚠️  Closing ${summary.openPositions} orphaned position(s) in database...`);
           await db.closeAllOpenTrades(false);
@@ -230,10 +217,6 @@ async function main() {
 
     } catch (error) {
       console.error('⚠️  Failed to fetch wallet balance:', (error as Error).message);
-      const choice = await askQuestion('Continue anyway? (y/n): ');
-      if (choice !== 'y' && choice !== 'yes') {
-        process.exit(0);
-      }
     }
   }
 
