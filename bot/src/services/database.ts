@@ -485,6 +485,53 @@ export class DatabaseService {
     }
   }
 
+  async initializeLiveBalance(walletBalance: number): Promise<void> {
+    const mode = 'live';
+    const existingStats = await this.getBotStats(mode);
+
+    if (!existingStats) {
+      // Create new stats with wallet balance
+      const { error } = await this.supabase
+        .from('bot_stats')
+        .insert({
+          mode,
+          initial_balance: walletBalance,
+          current_balance: walletBalance,
+          total_pnl_sol: 0,
+          total_pnl_percent: 0,
+          total_trades: 0,
+          winning_trades: 0,
+          losing_trades: 0,
+          win_rate: 0,
+          best_trade_pnl_percent: 0,
+          worst_trade_pnl_percent: 0,
+          total_volume_sol: 0,
+          avg_trade_pnl_percent: 0,
+        });
+
+      if (error) {
+        console.error('Failed to initialize live stats:', error);
+      } else {
+        console.log(`Live stats initialized with wallet balance: ${walletBalance} SOL`);
+      }
+    } else if (existingStats.total_trades === 0) {
+      // Update initial balance if no trades yet
+      const { error } = await this.supabase
+        .from('bot_stats')
+        .update({
+          initial_balance: walletBalance,
+          current_balance: walletBalance,
+        })
+        .eq('mode', mode);
+
+      if (error) {
+        console.error('Failed to update live balance:', error);
+      } else {
+        console.log(`Live stats updated with wallet balance: ${walletBalance} SOL`);
+      }
+    }
+  }
+
   async resetBotStats(mode: 'paper' | 'live', initialBalance?: number): Promise<void> {
     const balance = initialBalance ?? (process.env.STARTING_BALANCE_SOL
       ? parseFloat(process.env.STARTING_BALANCE_SOL)

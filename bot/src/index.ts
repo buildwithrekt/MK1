@@ -149,6 +149,18 @@ async function main() {
     jsonConfig.trading.default_pool || 'pump',
     jsonConfig.trading.use_jito || false
   );
+
+  // Initialize live balance from wallet if in live mode
+  if (!isDryRun && db) {
+    try {
+      const walletBalance = await executor.getWalletBalance();
+      console.log(`💰 Wallet balance: ${walletBalance.toFixed(4)} SOL`);
+      await db.initializeLiveBalance(walletBalance);
+    } catch (error) {
+      console.error('⚠️  Failed to fetch wallet balance:', (error as Error).message);
+    }
+  }
+
   const positionManager = new PositionManager(executor, botConfig, exitRules);
 
   // ═══════════════════════════════════════════════════════════════════════════
