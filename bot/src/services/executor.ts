@@ -325,13 +325,18 @@ export class ExecutorService {
 
     const data = await response.json() as PumpPortalResponse;
 
+    // Log full response for debugging
+    if (!data.signature) {
+      logger.warn(`PumpPortal response: ${JSON.stringify(data)}`);
+    }
+
     if (!response.ok || data.error || data.errors) {
-      const errorMsg = data.error || data.errors?.join(', ') || `HTTP ${response.status}`;
+      const errorMsg = data.error || data.errors?.join(', ') || JSON.stringify(data) || `HTTP ${response.status}`;
       throw new Error(`Trade API error: ${errorMsg}`);
     }
 
     if (!data.signature) {
-      throw new Error('No signature returned');
+      throw new Error(`No signature returned: ${JSON.stringify(data)}`);
     }
 
     return {
