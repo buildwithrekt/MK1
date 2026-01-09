@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import * as readline from 'readline';
 import { loadEnvConfig, validateConfig } from './config.js';
 import { loadBotConfig } from './bot-config.js';
 import { loadScanConfig } from './scan-config.js';
@@ -12,6 +13,21 @@ import { getHealthService } from './services/health.js';
 import { CONFIG_POLL_INTERVAL, PRICE_CHECK_INTERVAL } from './constants.js';
 import { fetchAndValidateToken, fetchTokenLogo } from './services/birdeye.js';
 import type { BotConfig, ExitRules } from './types/index.js';
+
+// Prompt user for confirmation
+async function askConfirmation(question: string): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.toLowerCase() === 'yes' || answer.toLowerCase() === 'y');
+    });
+  });
+}
 
 // Global error handlers for production stability
 process.on('uncaughtException', (error) => {
@@ -155,14 +171,55 @@ async function main() {
     await db.initializeBotConfig(envConfig.walletPublicKey, isDryRun);
   }
 
-  // Initialize live balance from wallet if in live mode
+  // ═══════════════════════════════════════════════════════════════════════════
+  // LIVE MODE CONFIRMATION - Show status and ask for confirmation before starting
+  // ═══════════════════════════════════════════════════════════════════════════
+  let walletBalance = 0;
   if (!isDryRun && db) {
     try {
-      const walletBalance = await executor.getWalletBalance();
-      console.log(`💰 Wallet balance: ${walletBalance.toFixed(4)} SOL`);
-      await db.initializeLiveBalance(walletBalance);
+      walletBalance = await executor.getWalletBalance();
+      const mode = 'live';
+      const summary = await db.getStartupSummary(mode);
+
+      console.log('');
+      console.log('╔═══════════════════════════════════════════════════════════════╗');
+      console.log('║                    🔴 LIVE MODE STARTUP                       ║');
+      console.log('╠═══════════════════════════════════════════════════════════════╣');
+      console.log(`║  Wallet Balance:     ${walletBalance.toFixed(4)} SOL`.padEnd(66) + '║');
+      console.log(`║  Open Positions:     ${summary.openPositions}`.padEnd(66) + '║');
+      console.log('╠═══════════════════════════════════════════════════════════════╣');
+      console.log('║  CURRENT STATS (will be reset):'.padEnd(66) + '║');
+      console.log(`║    Total Trades:     ${summary.totalTrades}`.padEnd(66) + '║');
+      console.log(`║    Total PnL:        ${summary.totalPnl >= 0 ? '+' : ''}${summary.totalPnl.toFixed(4)} SOL`.padEnd(66) + '║');
+      console.log(`║    Win Rate:         ${summary.winRate.toFixed(1)}%`.padEnd(66) + '║');
+      console.log('╠═══════════════════════════════════════════════════════════════╣');
+      console.log('║  ⚠️  This will:'.padEnd(66) + '║');
+      console.log('║    - Close all open positions in database'.padEnd(66) + '║');
+      console.log('║    - Reset PnL to 0'.padEnd(66) + '║');
+      console.log(`║    - Set initial balance to ${walletBalance.toFixed(4)} SOL`.padEnd(66) + '║');
+      console.log('╚═══════════════════════════════════════════════════════════════╝');
+      console.log('');
+
+      const confirmed = await askConfirmation('Do you want to continue? (yes/no): ');
+
+      if (!confirmed) {
+        console.log('');
+        console.log('❌ Startup cancelled by user.');
+        process.exit(0);
+      }
+
+      console.log('');
+      console.log('✅ Confirmed! Resetting stats and starting bot...');
+
+      // Full reset: close open trades and reset stats
+      await db.fullReset(mode, walletBalance);
+
     } catch (error) {
       console.error('⚠️  Failed to fetch wallet balance:', (error as Error).message);
+      const confirmed = await askConfirmation('Continue anyway? (yes/no): ');
+      if (!confirmed) {
+        process.exit(0);
+      }
     }
   }
 
@@ -759,18 +816,12 @@ async function main() {
     await pumpPortal.connect();
     pumpPortal.subscribeNewTokens();
 
-    // Restore any open positions from database (survives restarts)
-    const restoredCount = await positionManager.loadOpenPositions();
-    if (restoredCount > 0) {
-      logger.info(`Restored ${restoredCount} position(s) from database`);
-
-      // SAFETY: In LIVE mode with close_positions_on_startup enabled, sell all positions immediately
-      const closeOnStartup = jsonConfig.mode.close_positions_on_startup ?? true;
-      if (!isDryRun && closeOnStartup) {
-        logger.warn('⚠️  LIVE MODE: Closing all positions on startup for safety...');
-        const closedCount = await positionManager.closeAllPositions('MANUAL');
-        logger.info(`Closed ${closedCount} position(s) on startup`);
-      } else {
+    // In PAPER mode only: Restore open positions from database (survives restarts)
+    // In LIVE mode, positions are already reset in the confirmation flow
+    if (isDryRun) {
+      const restoredCount = await positionManager.loadOpenPositions();
+      if (restoredCount > 0) {
+        logger.info(`Restored ${restoredCount} position(s) from database`);
         // Subscribe to price updates for restored positions
         const restoredMints = positionManager.getOpenPositions().map(p => p.mint);
         if (restoredMints.length > 0) {

@@ -90,18 +90,18 @@ export function Navbar() {
             </div>
             <p> autonomous trador on solana blockchain powered by <span className="text-orange-400">Claude</span></p>
 
-          </nav>
           {config && (
             <span
               className={`text-xs px-2 py-1 rounded border ${
                 config.dry_run
                   ? "border-yellow-500 text-yellow-400 bg-yellow-500/10"
-                  : "border-red-500 text-red-400 bg-red-500/10 animate-pulse"
+                  : "border-green-500 text-green-400 bg-green-500/10 animate-pulse"
               }`}
             >
               {config.dry_run ? "◉ PAPER MODE" : "◉ LIVE MODE"}
             </span>
           )}
+          </nav>
         </div>
       </div>
     </header>

@@ -628,6 +628,61 @@ export class DatabaseService {
     return count || 0;
   }
 
+  // Get startup summary for confirmation prompt
+  async getStartupSummary(mode: 'paper' | 'live'): Promise<{
+    openPositions: number;
+    currentBalance: number;
+    totalPnl: number;
+    totalTrades: number;
+    winRate: number;
+  }> {
+    const isDryRun = mode === 'paper';
+    const openPositions = await this.getOpenPositionsCount(isDryRun);
+    const stats = await this.getBotStats(mode);
+
+    return {
+      openPositions,
+      currentBalance: stats?.current_balance ?? 0,
+      totalPnl: stats?.total_pnl_sol ?? 0,
+      totalTrades: stats?.total_trades ?? 0,
+      winRate: stats?.win_rate ?? 0,
+    };
+  }
+
+  // Close all open trades in database (mark as CLOSED with reason)
+  async closeAllOpenTrades(dryRun: boolean): Promise<number> {
+    const { data, error } = await this.supabase
+      .from('trades')
+      .update({
+        status: 'CLOSED',
+        exit_reason: 'MANUAL',
+        exit_time: new Date().toISOString(),
+      })
+      .eq('status', 'OPEN')
+      .eq('dry_run', dryRun)
+      .select('id');
+
+    if (error) {
+      console.error('Failed to close open trades:', error);
+      return 0;
+    }
+
+    return data?.length ?? 0;
+  }
+
+  // Full reset: close all trades and reset stats
+  async fullReset(mode: 'paper' | 'live', newBalance: number): Promise<void> {
+    const isDryRun = mode === 'paper';
+
+    // 1. Close all open trades
+    await this.closeAllOpenTrades(isDryRun);
+
+    // 2. Reset stats with new balance
+    await this.resetBotStats(mode, newBalance);
+
+    console.log(`✅ Full reset complete for ${mode} mode. New balance: ${newBalance} SOL`);
+  }
+
   // ============== LOGS CLEANUP ==============
 
   async cleanupLogs(): Promise<void> {
