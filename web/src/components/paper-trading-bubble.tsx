@@ -8,6 +8,7 @@ export function PaperTradingBubble() {
   const [openPositions, setOpenPositions] = React.useState(0);
   const [isExpanded, setIsExpanded] = React.useState(true);
   const [isDryRun, setIsDryRun] = React.useState(true);
+  const [realWalletBalance, setRealWalletBalance] = React.useState<number | null>(null);
   const errorCountRef = React.useRef(0);
   const lastFetchRef = React.useRef(0);
 
@@ -18,10 +19,10 @@ export function PaperTradingBubble() {
     lastFetchRef.current = now;
 
     try {
-      // First fetch mode from bot_config
+      // First fetch mode and wallet address from bot_config
       const { data: configData } = await supabase
         .from("bot_config")
-        .select("dry_run")
+        .select("dry_run, wallet_address")
         .limit(1)
         .maybeSingle();
 
@@ -29,6 +30,19 @@ export function PaperTradingBubble() {
       setIsDryRun(dryRun);
 
       const mode = dryRun ? "paper" : "live";
+
+      // If LIVE mode, fetch real wallet balance
+      if (!dryRun && configData?.wallet_address) {
+        try {
+          const res = await fetch(`/api/wallet?address=${configData.wallet_address}&t=${Date.now()}`);
+          const data = await res.json();
+          if (data.balance !== undefined) {
+            setRealWalletBalance(data.balance);
+          }
+        } catch {
+          // Fallback to stats balance if wallet fetch fails
+        }
+      }
 
       const { data: statsData, error } = await supabase
         .from("bot_stats")
@@ -105,6 +119,11 @@ export function PaperTradingBubble() {
     losing_trades: 0,
   };
 
+  // In LIVE mode, use real wallet balance if available
+  const displayBalance = !isDryRun && realWalletBalance !== null
+    ? realWalletBalance
+    : displayStats.current_balance;
+
   const pnl = displayStats.total_pnl_sol;
   const pnlPercent = displayStats.total_pnl_percent.toFixed(1);
 
@@ -155,7 +174,7 @@ export function PaperTradingBubble() {
                   ? "text-yellow-400 drop-shadow-[0_0_8px_rgba(234,179,8,0.5)]"
                   : "text-green-400 drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]"
               }`}>
-                {displayStats.current_balance.toFixed(4)} SOL
+                {displayBalance.toFixed(4)} SOL
               </span>
             </div>
 
