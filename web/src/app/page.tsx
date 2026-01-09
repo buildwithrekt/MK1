@@ -10,6 +10,7 @@ import { TopTrades } from "@/components/top-trades";
 import { PaperTradingBubble } from "@/components/paper-trading-bubble";
 import { AnalysisBanner } from "@/components/analysis-banner";
 import { TradeAnalysisTerminal } from "@/components/trade-analysis-terminal";
+import { WelcomeModal } from "@/components/welcome-modal";
 import { toast } from "sonner";
 
 interface Stats {
@@ -174,6 +175,7 @@ export default function Home() {
 
   return (
     <main>
+      <WelcomeModal />
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
         {/* Top Trades Section */}
         <TopTrades />
