@@ -371,16 +371,31 @@ export class ExecutorService {
     };
   }
 
-  // Get wallet balance
-  async getWalletBalance(): Promise<number> {
-    try {
-      const pubkey = new PublicKey(this.publicKey);
-      const balance = await this.rpc.getBalance(pubkey);
-      return balance / LAMPORTS_PER_SOL;
-    } catch (error) {
-      logger.error(`Failed to get wallet balance: ${(error as Error).message}`);
-      throw error;
+  // Get wallet balance with retry for rate limits
+  async getWalletBalance(retries = 3): Promise<number> {
+    const pubkey = new PublicKey(this.publicKey);
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const balance = await this.rpc.getBalance(pubkey);
+        return balance / LAMPORTS_PER_SOL;
+      } catch (error) {
+        const errorMsg = (error as Error).message;
+        const isRateLimit = errorMsg.includes('429') || errorMsg.includes('Too many requests');
+
+        if (isRateLimit && attempt < retries) {
+          const delay = Math.pow(2, attempt) * 1000; // 2s, 4s, 8s
+          logger.warn(`Rate limited, retrying in ${delay/1000}s... (attempt ${attempt}/${retries})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        logger.error(`Failed to get wallet balance: ${errorMsg}`);
+        throw error;
+      }
     }
+
+    throw new Error('Failed to get wallet balance after retries');
   }
 
   // Check if in dry run mode
