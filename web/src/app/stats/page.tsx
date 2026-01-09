@@ -60,10 +60,20 @@ export default function StatsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
+        // First fetch mode from bot_config
+        const { data: configData } = await supabase
+          .from("bot_config")
+          .select("dry_run")
+          .limit(1)
+          .maybeSingle();
+
+        const isDryRun = configData?.dry_run ?? true;
+        const mode = isDryRun ? "paper" : "live";
+
         const { data: tradesData } = await supabase
           .from("trades")
           .select("*")
-          .eq("dry_run", true)
+          .eq("dry_run", isDryRun)
           .order("created_at", { ascending: false });
 
         if (tradesData) {
@@ -73,7 +83,7 @@ export default function StatsPage() {
         const { data: botStats } = await supabase
           .from("bot_stats")
           .select("*")
-          .eq("mode", "paper")
+          .eq("mode", mode)
           .maybeSingle();
 
         if (botStats) {

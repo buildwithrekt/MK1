@@ -53,11 +53,20 @@ export function ScannedTokens({ className }: ScannedTokensProps) {
   React.useEffect(() => {
     const fetchTrades = async () => {
       try {
-        // Fetch from trades table (paper mode only)
+        // First fetch mode from bot_config
+        const { data: configData } = await supabase
+          .from("bot_config")
+          .select("dry_run")
+          .limit(1)
+          .maybeSingle();
+
+        const isDryRun = configData?.dry_run ?? true;
+
+        // Fetch trades based on current mode
         const { data, error } = await supabase
           .from("trades")
           .select("*")
-          .eq("dry_run", true)
+          .eq("dry_run", isDryRun)
           .order("created_at", { ascending: false })
           .limit(50);
 

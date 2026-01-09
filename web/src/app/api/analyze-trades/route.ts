@@ -107,11 +107,21 @@ export async function GET(request: NextRequest) {
   const force = searchParams.get("force") === "true";
 
   try {
+    // First fetch mode from bot_config
+    const { data: configData } = await supabase
+      .from("bot_config")
+      .select("dry_run")
+      .limit(1)
+      .maybeSingle();
+
+    const isDryRun = configData?.dry_run ?? true;
+    const mode = isDryRun ? "paper" : "live";
+
     // Get current trade count from bot_stats
     const { data: botStats } = await supabase
       .from("bot_stats")
       .select("total_trades, win_rate, total_pnl_sol")
-      .eq("mode", "paper")
+      .eq("mode", mode)
       .maybeSingle();
 
     const currentTotalTrades = botStats?.total_trades || 0;
@@ -154,7 +164,7 @@ export async function GET(request: NextRequest) {
       .from("trades")
       .select("*")
       .eq("status", "CLOSED")
-      .eq("dry_run", true)
+      .eq("dry_run", isDryRun)
       .order("exit_time", { ascending: false })
       .limit(50);
 

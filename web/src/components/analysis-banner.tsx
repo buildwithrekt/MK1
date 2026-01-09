@@ -36,10 +36,20 @@ export function AnalysisBanner() {
 
   const fetchTrades = useCallback(async () => {
     try {
+      // First fetch mode from bot_config
+      const { data: configData } = await supabase
+        .from("bot_config")
+        .select("dry_run")
+        .limit(1)
+        .maybeSingle();
+
+      const isDryRun = configData?.dry_run ?? true;
+      const mode = isDryRun ? "paper" : "live";
+
       const { data: botStats } = await supabase
         .from("bot_stats")
         .select("total_trades")
-        .eq("mode", "paper")
+        .eq("mode", mode)
         .maybeSingle();
 
       if (botStats) {

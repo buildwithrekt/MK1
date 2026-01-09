@@ -103,6 +103,15 @@ export async function GET(request: NextRequest) {
   const force = searchParams.get("force") === "true";
 
   try {
+    // First fetch mode from bot_config
+    const { data: configData } = await supabase
+      .from("bot_config")
+      .select("dry_run")
+      .limit(1)
+      .maybeSingle();
+
+    const isDryRun = configData?.dry_run ?? true;
+
     // Get last insight generation time
     const { data: lastInsight } = await supabase
       .from("insights")
@@ -132,7 +141,7 @@ export async function GET(request: NextRequest) {
         .from("trades")
         .select("*", { count: "exact", head: true })
         .eq("status", "CLOSED")
-        .eq("dry_run", true);
+        .eq("dry_run", isDryRun);
 
       return NextResponse.json({
         insights: activeInsights || [],
@@ -148,7 +157,7 @@ export async function GET(request: NextRequest) {
       .from("trades")
       .select("*")
       .eq("status", "CLOSED")
-      .eq("dry_run", true)
+      .eq("dry_run", isDryRun)
       .order("exit_time", { ascending: false });
 
     if (error) {

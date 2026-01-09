@@ -330,7 +330,7 @@ export class ExecutorService {
       logger.warn(`PumpPortal response: ${JSON.stringify(data)}`);
     }
 
-    if (!response.ok || data.error || data.errors) {
+    if (!response.ok || data.error || (data.errors && data.errors.length > 0)) {
       const errorMsg = data.error || data.errors?.join(', ') || JSON.stringify(data) || `HTTP ${response.status}`;
       throw new Error(`Trade API error: ${errorMsg}`);
     }

@@ -49,13 +49,23 @@ export default function Home() {
 
     fetchWalletAddress();
 
-    // Fetch paper trading stats from bot_stats (same as bubble)
-    const fetchPaperStats = async () => {
+    // Fetch trading stats from bot_stats (dynamic mode based on config)
+    const fetchStats = async () => {
       try {
+        // First fetch mode from bot_config
+        const { data: configData } = await supabase
+          .from("bot_config")
+          .select("dry_run")
+          .limit(1)
+          .maybeSingle();
+
+        const isDryRun = configData?.dry_run ?? true;
+        const mode = isDryRun ? "paper" : "live";
+
         const { data: botStats } = await supabase
           .from("bot_stats")
           .select("*")
-          .eq("mode", "paper")
+          .eq("mode", mode)
           .maybeSingle();
 
         if (botStats) {
@@ -68,7 +78,7 @@ export default function Home() {
           }));
         }
       } catch (error) {
-        console.error("Failed to fetch paper stats:", error);
+        console.error("Failed to fetch stats:", error);
       }
     };
 
@@ -81,11 +91,13 @@ export default function Home() {
         .single();
       if (configData) setConfig(configData);
 
-      // Fetch open positions count
+      const isDryRun = configData?.dry_run ?? true;
+
+      // Fetch open positions count based on current mode
       const { count: openCount } = await supabase
         .from("trades")
         .select("*", { count: "exact", head: true })
-        .eq("dry_run", true)
+        .eq("dry_run", isDryRun)
         .eq("status", "OPEN");
 
       setStats((prev) => ({
@@ -104,7 +116,7 @@ export default function Home() {
     };
 
     fetchData();
-    fetchPaperStats();
+    fetchStats();
 
     // Setup realtime subscriptions
     const configChannel = supabase
@@ -130,7 +142,7 @@ export default function Home() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "bot_stats" },
-        () => fetchPaperStats()
+        () => fetchStats()
       )
       .subscribe();
 
@@ -156,7 +168,7 @@ export default function Home() {
     // Backup polling every 30s
     const pollingInterval = setInterval(() => {
       fetchData();
-      fetchPaperStats();
+      fetchStats();
     }, 30000);
 
     return () => {
